@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { q, getSettings, setSetting, DEFAULT_SETTINGS } from '../db.js';
+import { q, getSettings, setSetting, DEFAULT_SETTINGS, SYSTEM_STEPS } from '../db.js';
 import { requireAuth, requireRole, hashPassword, verifyPassword, setSession, clearSession, publicUser } from '../auth.js';
-import { GROUPS, PHASES, POSITIONS, POSITION_CODES } from '../positions.js';
+import { GROUPS, PHASES, POSITIONS, POSITION_CODES, MEMBER_POSITIONS, MEMBER_POSITION_CODES } from '../positions.js';
 import { REQUIREMENT_OPTIONS } from '../estimator.js';
 
 const router = Router();
@@ -48,8 +48,9 @@ router.put('/auth/password', requireAuth, (req, res) => {
 // ---------- ข้อมูลอ้างอิง ----------
 router.get('/meta', requireAuth, (_req, res) => {
   res.json({
-    groups: GROUPS, phases: PHASES, positions: POSITIONS,
+    groups: GROUPS, phases: PHASES, positions: POSITIONS, member_positions: MEMBER_POSITIONS,
     requirement_options: REQUIREMENT_OPTIONS,
+    sales_steps: getSettings().sales_steps,
     users: q.all('SELECT id, name, position, role FROM users WHERE active = 1 ORDER BY name'),
   });
 });
@@ -62,7 +63,25 @@ router.put('/settings/:key', admin, (req, res) => {
   if (!(key in DEFAULT_SETTINGS)) return res.status(404).json({ error: 'ไม่พบการตั้งค่านี้' });
   let value = req.body;
 
-  if (key === 'payment_terms') {
+  if (key === 'sales_steps') {
+    if (!Array.isArray(value)) return res.status(400).json({ error: 'รูปแบบขั้นตอนไม่ถูกต้อง' });
+    if (value.length > 12) return res.status(400).json({ error: 'มีขั้นตอนได้ไม่เกิน 12 ขั้น' });
+    const seen = new Set();
+    let n = 0;
+    value = value.map((s) => {
+      let id = String(s?.id || '');
+      // ขั้นตอนที่เพิ่มเอง: ใช้รหัสเดิมถ้าถูกรูปแบบ ไม่งั้นออกรหัสใหม่
+      if (!SYSTEM_STEPS.includes(id) && !/^c_[a-z0-9]{1,12}$/.test(id)) id = '';
+      while (!id || seen.has(id)) id = `c_${Date.now().toString(36)}${n++}`;
+      seen.add(id);
+      return { id, label: String(s?.label || '').trim().slice(0, 40) };
+    });
+    if (value.some((s) => !s.label)) return res.status(400).json({ error: 'กรุณาตั้งชื่อให้ครบทุกขั้นตอน' });
+    if (SYSTEM_STEPS.some((id) => !seen.has(id))) return res.status(400).json({ error: 'ลบขั้นตอนของระบบไม่ได้ (รับ Requirement, ประเมินราคา, เสนอราคา, ปิดการขาย)' });
+    const order = value.map((s) => s.id).filter((id) => SYSTEM_STEPS.includes(id));
+    if (order.join() !== SYSTEM_STEPS.join()) return res.status(400).json({ error: 'ขั้นตอนของระบบต้องเรียงตามลำดับเดิม' });
+    if (value[value.length - 1].id !== 'won') return res.status(400).json({ error: 'ขั้นตอนปิดการขายต้องอยู่ท้ายสุด' });
+  } else if (key === 'payment_terms') {
     if (!Array.isArray(value) || !value.length) return res.status(400).json({ error: 'ต้องมีอย่างน้อย 1 งวด' });
     value = value.map((t) => ({ label: String(t.label || '').trim() || 'งวดชำระ', percent: Number(t.percent) || 0 }));
     const total = value.reduce((s, t) => s + t.percent, 0);
@@ -82,8 +101,16 @@ router.put('/settings/:key', admin, (req, res) => {
 });
 
 // ---------- ผู้ใช้ ----------
+// เบอร์โทรศัพท์สมาชิก: คืนตัวเลขล้วน, null ถ้าไม่กรอก, false ถ้าเกิน 10 หลัก
+function cleanPhone(value) {
+  if (value == null || value === '') return null;
+  const digits = String(value).replace(/\D/g, '');
+  return digits.length > 10 ? false : digits || null;
+}
+const PHONE_ERROR = 'เบอร์โทรศัพท์ต้องเป็นตัวเลขไม่เกิน 10 หลัก';
+
 router.get('/users', admin, (_req, res) => {
-  res.json(q.all('SELECT id, name, email, role, position, active, created_at FROM users ORDER BY active DESC, id'));
+  res.json(q.all('SELECT id, name, email, phone, role, position, active, created_at FROM users ORDER BY active DESC, id'));
 });
 
 router.post('/users', admin, (req, res) => {
@@ -92,10 +119,12 @@ router.post('/users', admin, (req, res) => {
   if (!b.name?.trim() || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'กรุณากรอกชื่อและอีเมลให้ถูกต้อง' });
   if (String(b.password || '').length < 8) return res.status(400).json({ error: 'รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร' });
   if (q.get('SELECT id FROM users WHERE email = ?', email)) return res.status(409).json({ error: 'อีเมลนี้มีอยู่แล้ว' });
+  const phone = cleanPhone(b.phone);
+  if (phone === false) return res.status(400).json({ error: PHONE_ERROR });
   q.run(
-    'INSERT INTO users (name, email, password_hash, role, position) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO users (name, email, password_hash, role, position, phone) VALUES (?, ?, ?, ?, ?, ?)',
     b.name.trim(), email, hashPassword(b.password), ROLES.includes(b.role) ? b.role : 'staff',
-    POSITION_CODES.includes(b.position) ? b.position : null,
+    MEMBER_POSITION_CODES.includes(b.position) ? b.position : null, phone,
   );
   res.status(201).json({ ok: true });
 });
@@ -111,11 +140,13 @@ router.put('/users/:id', admin, (req, res) => {
     if (!others) return res.status(409).json({ error: 'ต้องมีผู้ดูแลระบบอย่างน้อย 1 คน' });
   }
   if (b.password && String(b.password).length < 8) return res.status(400).json({ error: 'รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร' });
+  const phone = 'phone' in b ? cleanPhone(b.phone) : u.phone;
+  if (phone === false) return res.status(400).json({ error: PHONE_ERROR });
   q.run(
-    'UPDATE users SET name = ?, role = ?, position = ?, active = ?, password_hash = ? WHERE id = ?',
+    'UPDATE users SET name = ?, role = ?, position = ?, active = ?, password_hash = ?, phone = ? WHERE id = ?',
     b.name?.trim() || u.name, role,
-    'position' in b ? (POSITION_CODES.includes(b.position) ? b.position : null) : u.position,
-    active, b.password ? hashPassword(b.password) : u.password_hash, u.id,
+    'position' in b ? (MEMBER_POSITION_CODES.includes(b.position) ? b.position : null) : u.position,
+    active, b.password ? hashPassword(b.password) : u.password_hash, phone, u.id,
   );
   res.json({ ok: true });
 });

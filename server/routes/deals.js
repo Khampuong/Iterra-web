@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { q, tx, getSettings, nextCode, today, addDays, addBusinessDays, notify } from '../db.js';
-import { PROJECT_ROLES, requireRole, seesAll, SELL_ROLES, WIDE_ROLES } from '../auth.js';
+import crypto from 'node:crypto';
+import { q, tx, getSettings, nextCode, today, addDays, addBusinessDays, notify, SYSTEM_STEPS } from '../db.js';
+import { hashPassword, PROJECT_ROLES, requireRole, seesAll, SELL_ROLES, WIDE_ROLES } from '../auth.js';
 import { priceItem, dealTotals, feasibility, suggestDuration, cleanEffort, fallbackAnalyze, parseChecks, REQUIREMENT_OPTIONS } from '../estimator.js';
 import { fallbackDemo } from '../demo-template.js';
 import { analyzeRequirement, generateDemo, AiUnavailable } from '../ai.js';
@@ -34,6 +35,42 @@ function normalizeChecks(b) {
   b.requirement_checks = JSON.stringify([...new Set(list)]);
 }
 
+// หาพนักงานขายของงานจากชื่อ/อีเมลที่กรอกในฟอร์มงานขายใหม่
+// ตรงกับสมาชิกที่มีอยู่ -> ใช้สมาชิกคนนั้น · ไม่ตรง -> เพิ่มสมาชิกใหม่เป็นพนักงานขาย (role sales)
+function resolveSalesperson(input, currentUser) {
+  const name = String(input?.name || '').trim();
+  const email = String(input?.email || '').trim().toLowerCase();
+  const password = String(input?.password || '');
+  if (!name && !email) return { id: currentUser.id };
+
+  const found = (email && q.get('SELECT * FROM users WHERE email = ?', email))
+    || (name && q.get('SELECT * FROM users WHERE lower(trim(name)) = ? ORDER BY active DESC, id LIMIT 1', name.toLowerCase()));
+  if (found) {
+    if (!found.active) return { error: `สมาชิก “${found.name}” ถูกปิดการใช้งาน` };
+    if (!SELL_ROLES.includes(found.role)) return { error: `สมาชิก “${found.name}” ไม่มีสิทธิ์ขายงาน` };
+    return { id: found.id, name: found.name };
+  }
+
+  if (!name) return { error: 'กรุณากรอกชื่อพนักงานขาย' };
+  if (!/^\S+@\S+\.\S+$/.test(email)) return { error: `ไม่พบ “${name}” ในสมาชิก กรุณากรอกอีเมลเพื่อเพิ่มเป็นพนักงานขาย` };
+  // ใช้รหัสผ่านที่กรอกมา ถ้าเว้นว่างจะสุ่มรหัสชั่วคราวให้
+  if (password && password.length < 8) return { error: 'รหัสผ่านพนักงานขายต้องยาวอย่างน้อย 8 ตัวอักษร' };
+  const tempPassword = password ? null : crypto.randomBytes(6).toString('base64url');
+  const r = q.run(
+    "INSERT INTO users (name, email, password_hash, role, position) VALUES (?, ?, ?, 'sales', 'SALE')",
+    name, email, hashPassword(password || tempPassword),
+  );
+  return { id: Number(r.lastInsertRowid), name, email, created: true, temp_password: tempPassword };
+}
+
+// ขั้นตอนปัจจุบันของงานขาย = ตำแหน่งที่ไกลกว่าระหว่างสถานะของระบบกับขั้นตอนที่เลือกเอง
+function currentStep(deal, steps) {
+  if (deal.status === 'lost') return null;
+  if (deal.status === 'won') return 'won';
+  const at = (id) => steps.findIndex((s) => s.id === id);
+  return steps[Math.max(at(deal.status), at(deal.step), 0)].id;
+}
+
 function adminIds() {
   return q.all("SELECT id FROM users WHERE role = 'admin' AND active = 1").map((u) => u.id);
 }
@@ -62,6 +99,7 @@ export function loadDeal(deal, { withDemo = true } = {}) {
     ...rest,
     analysis: analysis ? JSON.parse(analysis) : null,
     requirement_checks: parseChecks(deal),
+    step: currentStep(deal, settings.sales_steps),
     has_demo: Boolean(demo_html),
     ...(withDemo ? { demo_html } : {}),
     items,
@@ -146,7 +184,7 @@ router.get('/', view, (req, res) => {
     const totals = dealTotals(items, d, settings);
     return {
       id: d.id, code: d.code, title: d.title, customer_name: d.customer_name, customer_company: d.customer_company,
-      status: d.status, deadline: d.deadline, created_at: d.created_at, duration_days: d.duration_days,
+      status: d.status, step: currentStep(d, settings.sales_steps), deadline: d.deadline, created_at: d.created_at, duration_days: d.duration_days,
       net: totals.net, feasibility: items.length ? feasibility(d, totals, settings).score : null,
       sales_name: q.get('SELECT name FROM users WHERE id = ?', d.sales_id)?.name ?? null,
     };
@@ -158,12 +196,20 @@ router.post('/', sales, (req, res) => {
   if (!normalizePhone(b)) return res.status(400).json({ error: 'เบอร์โทรศัพท์ต้องเป็นตัวเลขไม่เกิน 10 หลัก' });
   normalizeChecks(b);
   if (!b.title?.trim() || !b.customer_name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่องานและชื่อลูกค้า' });
+  const sp = resolveSalesperson(b.salesperson, req.user);
+  if (sp.error) return res.status(400).json({ error: sp.error });
   const code = nextCode('deals', 'code', 'DL');
   const r = q.run(
     `INSERT INTO deals (code, sales_id, ${FIELDS.join(', ')}) VALUES (?, ?, ${FIELDS.map(() => '?').join(', ')})`,
-    code, req.user.id, ...FIELDS.map((f) => (b[f] === '' || b[f] == null ? (f === 'requirement' ? '' : f === 'requirement_checks' ? '[]' : null) : b[f])),
+    code, sp.id, ...FIELDS.map((f) => (b[f] === '' || b[f] == null ? (f === 'requirement' ? '' : f === 'requirement_checks' ? '[]' : null) : b[f])),
   );
-  res.status(201).json({ id: Number(r.lastInsertRowid), code });
+  const id = Number(r.lastInsertRowid);
+  if (sp.id !== req.user.id) notify({ user_id: sp.id, title: `คุณได้รับมอบหมายงานขาย ${code}`, body: b.title.trim(), link: `/deals/${id}` });
+  if (sp.created) {
+    for (const uid of adminIds()) notify({ user_id: uid, title: `เพิ่มสมาชิกใหม่: ${sp.name}`, body: `พนักงานขาย · เพิ่มจากงานขาย ${code} โดย ${req.user.name}`, link: '/members' });
+  }
+  // รหัสผ่านชั่วคราวส่งกลับครั้งเดียวตอนสร้างสมาชิกใหม่
+  res.status(201).json({ id, code, salesperson: { id: sp.id, name: sp.name ?? req.user.name, email: sp.email, created: Boolean(sp.created), temp_password: sp.temp_password }, can_view: seesAll(req.user) || sp.id === req.user.id });
 });
 
 router.get('/:id', view, (req, res) => {
@@ -272,6 +318,43 @@ router.put('/:id/estimate', admin, (req, res) => {
       Math.max(0, Number(discount) || 0), Math.max(0, Math.round(Number(duration_days) || 0)), deal.id,
     );
   });
+  res.json(loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)));
+});
+
+// ย้ายงานขายไปขั้นตอนที่เลือก (ขั้นตอนปิดการขายต้องทำผ่านปุ่มปิดการขาย)
+router.put('/:id/step', sales, (req, res) => {
+  const deal = findDeal(req, res);
+  if (!deal) return;
+  if (CLOSED.includes(deal.status)) return res.status(409).json({ error: 'งานนี้ปิดแล้ว เปลี่ยนขั้นตอนไม่ได้' });
+  const steps = getSettings().sales_steps;
+  const target = steps.findIndex((s) => s.id === req.body?.step);
+  if (target < 0) return res.status(400).json({ error: 'ไม่พบขั้นตอนนี้' });
+  if (steps[target].id === 'won') return res.status(400).json({ error: 'กรุณาใช้ปุ่ม “ปิดการขาย” เพื่อปิดงาน' });
+  // สถานะของระบบ = ขั้นตอนของระบบตัวล่าสุดที่อยู่ไม่เกินขั้นตอนที่เลือก
+  const status = steps.slice(0, target + 1).map((s) => s.id).filter((id) => SYSTEM_STEPS.includes(id)).pop() ?? 'draft';
+  q.run('UPDATE deals SET step = ?, status = ? WHERE id = ?', steps[target].id, status, deal.id);
+  res.json(loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)));
+});
+
+// admin แนบลิงก์ Demo ให้พนักงานขายนำไปเสนอลูกค้า (ส่งค่าว่างเพื่อลบลิงก์)
+router.put('/:id/demo-link', admin, (req, res) => {
+  const deal = findDeal(req, res);
+  if (!deal) return;
+  const raw = String(req.body?.url || '').trim();
+  let url = null;
+  if (raw) {
+    try {
+      const u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`);
+      if (!['http:', 'https:'].includes(u.protocol) || !u.hostname.includes('.')) throw new Error('bad url');
+      url = u.href;
+    } catch {
+      return res.status(400).json({ error: 'ลิงก์ไม่ถูกต้อง ต้องขึ้นต้นด้วย http:// หรือ https://' });
+    }
+  }
+  q.run('UPDATE deals SET demo_url = ? WHERE id = ?', url, deal.id);
+  if (url && url !== deal.demo_url && deal.sales_id && deal.sales_id !== req.user.id) {
+    notify({ user_id: deal.sales_id, title: `มีลิงก์ Demo สำหรับ ${deal.code}`, body: `${deal.title} — พร้อมนำเสนอลูกค้า`, link: `/deals/${deal.id}` });
+  }
   res.json(loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)));
 });
 

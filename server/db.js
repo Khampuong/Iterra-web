@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'staff',        -- admin | sales | staff
   position TEXT,                             -- รหัสตำแหน่งงาน เช่น PM, FE
+  phone TEXT,                                -- เบอร์โทรศัพท์ ตัวเลขไม่เกิน 10 หลัก
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -39,6 +40,8 @@ CREATE TABLE IF NOT EXISTS deals (
   sales_id INTEGER REFERENCES users(id),
   analysis TEXT,                             -- JSON ผลวิเคราะห์
   demo_html TEXT, demo_source TEXT,
+  demo_url TEXT,                             -- ลิงก์ Demo ที่ admin แนบให้พนักงานขายนำเสนอ
+  step TEXT,                                 -- ขั้นตอนงานขายปัจจุบัน (รหัสจาก settings.sales_steps)
   duration_days INTEGER NOT NULL DEFAULT 0,  -- วันทำการ
   discount REAL NOT NULL DEFAULT 0,
   close_note TEXT,
@@ -123,10 +126,33 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 `);
 
+// สัดส่วนผลประโยชน์ของพนักงานขายรายโครงการ (% ของมูลค่างาน) — NULL = ใช้ค่าจากหน้าตั้งค่า
+if (!db.prepare('PRAGMA table_info(projects)').all().some((c) => c.name === 'sales_percent')) {
+  db.exec('ALTER TABLE projects ADD COLUMN sales_percent REAL');
+}
+
+// ฐานข้อมูลที่สร้างก่อนมีขั้นตอนงานขายแบบแก้ไขได้: เพิ่มคอลัมน์ให้
+if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'step')) {
+  db.exec('ALTER TABLE deals ADD COLUMN step TEXT');
+}
+
+// ฐานข้อมูลที่สร้างก่อนมีลิงก์ Demo: เพิ่มคอลัมน์ให้
+if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'demo_url')) {
+  db.exec('ALTER TABLE deals ADD COLUMN demo_url TEXT');
+}
+
 // ฐานข้อมูลที่สร้างก่อนมีเช็คลิสต์: เพิ่มคอลัมน์ให้
 if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'requirement_checks')) {
   db.exec("ALTER TABLE deals ADD COLUMN requirement_checks TEXT NOT NULL DEFAULT '[]'");
 }
+
+// ฐานข้อมูลที่สร้างก่อนมีเบอร์โทรศัพท์สมาชิก: เพิ่มคอลัมน์ให้
+if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'phone')) {
+  db.exec('ALTER TABLE users ADD COLUMN phone TEXT');
+}
+
+// พนักงานขายที่ยังไม่มีตำแหน่ง ให้เป็นตำแหน่ง Sale
+db.exec("UPDATE users SET position = 'SALE' WHERE role = 'sales' AND position IS NULL");
 
 // ---------- helpers ----------
 export const q = {
@@ -165,7 +191,17 @@ export const DEFAULT_SETTINGS = {
   ],
   sharing: { sales_percent: 5, company_percent: 40 },
   capacity: { max_active_projects: 5, parallel_people: 3, buffer_percent: 15 },
+  // ขั้นตอนงานขาย: draft / analyzed / quoted / won เป็นขั้นตอนของระบบ (แก้ชื่อได้ ลบไม่ได้)
+  // admin เพิ่มขั้นตอนของตัวเองได้ (รหัสขึ้นต้นด้วย c_) โดย won ต้องอยู่ท้ายสุดเสมอ
+  sales_steps: [
+    { id: 'draft', label: 'รับ Requirement' },
+    { id: 'analyzed', label: 'ประเมินราคา' },
+    { id: 'quoted', label: 'เสนอราคา' },
+    { id: 'won', label: 'ปิดการขาย' },
+  ],
 };
+
+export const SYSTEM_STEPS = ['draft', 'analyzed', 'quoted', 'won'];
 
 export function getSettings() {
   const out = structuredClone(DEFAULT_SETTINGS);

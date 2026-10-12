@@ -38,4 +38,9 @@ export const POSITIONS = [
 ];
 
 export const POSITION_CODES = POSITIONS.map((p) => p.code);
+
+// ตำแหน่งของสมาชิก = 17 ตำแหน่งงานผลิต + Sale (ไม่ใช้คิด man-day ในใบเสนอราคา)
+export const SALE_POSITION = { code: 'SALE', name: 'Sale', th: 'พนักงานขาย', group: 'plan' };
+export const MEMBER_POSITIONS = [SALE_POSITION, ...POSITIONS];
+export const MEMBER_POSITION_CODES = MEMBER_POSITIONS.map((p) => p.code);
 export const positionByCode = Object.fromEntries(POSITIONS.map((p) => [p.code, p]));

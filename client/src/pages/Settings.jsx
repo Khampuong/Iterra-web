@@ -1,25 +1,29 @@
 import { useEffect, useState } from 'react';
-import { api, ROLE_LABEL } from '../lib.js';
+import { api, phoneDigits, ROLE_LABEL } from '../lib.js';
 import { Badge, Field, Icon, Modal, Tabs, useApp, useData } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 
 export default function Settings() {
-  const { run } = useApp();
+  const { run, loadMeta } = useApp();
   const [settings, , setSettings] = useData('/settings');
   const [tab, setTab] = useState('pricing');
   if (!settings) return null;
 
   const save = async (key, value) => {
     const out = await run(() => api.put(`/settings/${key}`, value), 'บันทึกการตั้งค่าแล้ว');
-    if (out) setSettings(out);
+    if (out) {
+      setSettings(out);
+      if (key === 'sales_steps') loadMeta();
+    }
   };
 
   return (
     <>
       <PageHead eyebrow="ผู้ดูแลระบบ" title="ตั้งค่า" sub="อัตราค่าแรง ราคา งวดชำระ การแบ่งผลประโยชน์ และข้อมูลบริษัท" />
-      <Tabs value={tab} onChange={setTab} tabs={[['pricing', 'ราคาและค่าแรง'], ['terms', 'งวดชำระและผลประโยชน์'], ['company', 'ข้อมูลบริษัท']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['pricing', 'ราคาและค่าแรง'], ['terms', 'งวดชำระและผลประโยชน์'], ['steps', 'ขั้นตอนงานขาย'], ['company', 'ข้อมูลบริษัท']]} />
       {tab === 'pricing' && <Pricing settings={settings} save={save} />}
       {tab === 'terms' && <Terms settings={settings} save={save} />}
+      {tab === 'steps' && <SalesSteps settings={settings} save={save} />}
       {tab === 'company' && <Company settings={settings} save={save} />}
     </>
   );
@@ -102,6 +106,57 @@ function Terms({ settings, save }) {
   );
 }
 
+const SYSTEM_STEP_IDS = ['draft', 'analyzed', 'quoted', 'won'];
+
+// ขั้นตอนงานขาย: แก้ชื่อได้ทุกขั้น เพิ่ม/ลบ/เลื่อนได้เฉพาะขั้นที่เพิ่มเอง
+function SalesSteps({ settings, save }) {
+  const [steps, setSteps] = useState(settings.sales_steps);
+  useEffect(() => setSteps(settings.sales_steps), [settings.sales_steps]);
+  const isSystem = (s) => SYSTEM_STEP_IDS.includes(s.id);
+  const set = (i, label) => setSteps(steps.map((s, n) => (n === i ? { ...s, label } : s)));
+  const swap = (i, j) => {
+    const next = [...steps];
+    [next[i], next[j]] = [next[j], next[i]];
+    setSteps(next);
+  };
+  // เลื่อนได้เฉพาะขั้นที่เพิ่มเอง และห้ามเลยขั้นปิดการขายซึ่งอยู่ท้ายสุด
+  const canMove = (i, j) => !isSystem(steps[i]) && j >= 0 && j < steps.length - 1;
+  const add = () => setSteps([...steps.slice(0, -1), { id: '', label: '' }, steps[steps.length - 1]]);
+  const dirty = JSON.stringify(steps) !== JSON.stringify(settings.sales_steps);
+
+  return (
+    <div className="card stack">
+      <div>
+        <h2>ขั้นตอนงานขาย</h2>
+        <p className="small muted">แถบขั้นตอนที่แสดงบนหน้างานขาย — แก้ชื่อได้ทุกขั้น และเพิ่มขั้นตอนของบริษัทเองได้ เช่น “นัดนำเสนอ” หรือ “ต่อรองราคา”</p>
+      </div>
+      {steps.map((s, i) => (
+        <div className="row" key={i} style={{ flexWrap: 'nowrap' }}>
+          <span className="num muted" style={{ width: 22 }}>{i + 1}</span>
+          <input value={s.label} maxLength={40} onChange={(e) => set(i, e.target.value)} placeholder="ชื่อขั้นตอน" aria-label={`ชื่อขั้นตอนที่ ${i + 1}`} />
+          {isSystem(s) ? <span className="small muted nowrap" style={{ width: 196 }}>ขั้นตอนของระบบ</span> : (
+            <span className="row nowrap" style={{ width: 196, gap: 4, flexWrap: 'nowrap' }}>
+              <button className="btn sm ghost" disabled={!canMove(i, i - 1)} onClick={() => swap(i, i - 1)}>ขึ้น</button>
+              <button className="btn sm ghost" disabled={!canMove(i, i + 1)} onClick={() => swap(i, i + 1)}>ลง</button>
+              <button className="btn sm ghost danger" onClick={() => setSteps(steps.filter((_, n) => n !== i))} aria-label="ลบขั้นตอน"><Icon name="trash" /></button>
+            </span>
+          )}
+        </div>
+      ))}
+      <div className="row">
+        <button className="btn sm" disabled={steps.length >= 12} onClick={add}><Icon name="plus" />เพิ่มขั้นตอน</button>
+        <div style={{ flex: 1 }} />
+        {dirty && <button className="btn" onClick={() => setSteps(settings.sales_steps)}>ยกเลิก</button>}
+        <button className="btn primary" disabled={!dirty} onClick={() => save('sales_steps', steps)}>บันทึกขั้นตอน</button>
+      </div>
+      <p className="small muted">
+        ขั้นตอนของระบบ 4 ขั้นลบและสลับลำดับกันไม่ได้ เพราะผูกกับการวิเคราะห์ ออกใบเสนอราคา และปิดการขาย · ขั้นปิดการขายอยู่ท้ายสุดเสมอ ·
+        ย้ายงานไปขั้นตอนใดก็ได้โดยกดที่ขั้นตอนนั้นบนหน้างานขาย
+      </p>
+    </div>
+  );
+}
+
 function Company({ settings, save }) {
   const [f, setF] = useState(settings.company);
   const input = (k, label, wide) => (
@@ -152,21 +207,22 @@ function Users() {
     <div className="card flush">
       <div className="card-head">
         <div><h2>สมาชิกทั้งหมด</h2><p className="small muted">ตำแหน่งงานใช้มอบหมายงานอัตโนมัติเมื่อเปิดโครงการ</p></div>
-        <button className="btn primary sm" onClick={() => setForm({ name: '', email: '', password: '', role: 'staff', position: '' })}><Icon name="plus" />เพิ่มสมาชิก</button>
+        <button className="btn primary sm" onClick={() => setForm({ name: '', email: '', phone: '', password: '', role: 'staff', position: '' })}><Icon name="plus" />เพิ่มสมาชิก</button>
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>ชื่อ</th><th>อีเมล</th><th>สิทธิ์</th><th>ตำแหน่งงาน</th><th>สถานะ</th><th /></tr></thead>
+          <thead><tr><th>ชื่อ</th><th>อีเมล</th><th>เบอร์โทรศัพท์</th><th>สิทธิ์</th><th>ตำแหน่งงาน</th><th>สถานะ</th><th /></tr></thead>
           <tbody>
             {(users ?? []).map((u) => (
               <tr key={u.id}>
                 <td>{u.name}</td>
                 <td>{u.email}</td>
+                <td className="num nowrap">{u.phone || '—'}</td>
                 <td>{ROLE_LABEL[u.role]}</td>
-                <td>{meta.positions.find((p) => p.code === u.position)?.name ?? '—'}</td>
+                <td>{meta.member_positions.find((p) => p.code === u.position)?.name ?? '—'}</td>
                 <td><Badge tone={u.active ? 'ok' : ''}>{u.active ? 'ใช้งาน' : 'ปิดใช้งาน'}</Badge></td>
                 <td className="right nowrap">
-                  <button className="btn sm ghost" onClick={() => setForm({ ...u, position: u.position ?? '', password: '' })}>แก้ไข</button>
+                  <button className="btn sm ghost" onClick={() => setForm({ ...u, position: u.position ?? '', phone: u.phone ?? '', password: '' })}>แก้ไข</button>
                   <button className="btn sm ghost" onClick={() => toggle(u)}>{u.active ? 'ปิดใช้งาน' : 'เปิดใช้งาน'}</button>
                 </td>
               </tr>
@@ -179,8 +235,11 @@ function Users() {
           <div className="grid g2">
             <Field label="ชื่อ"><input value={form.name} onChange={set('name')} autoFocus /></Field>
             <Field label="อีเมล"><input type="email" value={form.email} onChange={set('email')} disabled={Boolean(form.id)} /></Field>
-            <Field label="สิทธิ์"><select value={form.role} onChange={set('role')}>{Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
-            <Field label="ตำแหน่งงาน"><select value={form.position} onChange={set('position')}><option value="">—</option>{meta.positions.map((p) => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}</select></Field>
+            <Field label="เบอร์โทรศัพท์ (ตัวเลขไม่เกิน 10 หลัก)" style={{ gridColumn: '1 / -1' }}>
+              <input type="tel" inputMode="numeric" maxLength={10} value={form.phone} onChange={(e) => setForm({ ...form, phone: phoneDigits(e.target.value) })} />
+            </Field>
+            <Field label="สิทธิ์"><select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value, position: e.target.value === 'sales' && !form.position ? 'SALE' : form.position })}>{Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
+            <Field label="ตำแหน่งงาน"><select value={form.position} onChange={set('position')}><option value="">—</option>{meta.member_positions.map((p) => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}</select></Field>
             <Field label={form.id ? 'ตั้งรหัสผ่านใหม่ (เว้นว่างถ้าไม่เปลี่ยน)' : 'รหัสผ่าน (อย่างน้อย 8 ตัวอักษร)'} style={{ gridColumn: '1 / -1' }}>
               <input type="password" autoComplete="new-password" value={form.password} onChange={set('password')} />
             </Field>

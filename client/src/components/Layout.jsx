@@ -110,7 +110,13 @@ export default function Layout() {
         </div>
       </aside>
       <div className="main">
-        <div className="top"><Notifications /></div>
+        <div className="top">
+          <Notifications />
+          <div className="top-user" title={user.email}>
+            <span className="avatar" aria-hidden="true">{user.name.trim().charAt(0)}</span>
+            <span><b>{user.name}</b><small>{ROLE_LABEL[user.role]}{user.position ? ` · ${user.position}` : ''}</small></span>
+          </div>
+        </div>
         <div className="page"><Outlet /></div>
       </div>
       {pw && <PasswordModal onClose={() => setPw(false)} />}

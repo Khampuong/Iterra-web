@@ -71,7 +71,7 @@ export const PROJECT_STATUS = {
 };
 export const TASK_STATUS = { todo: 'รอเริ่ม', doing: 'กำลังทำ', review: 'รอตรวจ', done: 'เสร็จ' };
 export const DOC_TYPE = { quotation: 'ใบเสนอราคา', contract: 'สัญญาจ้างพัฒนาระบบ', invoice: 'ใบแจ้งหนี้', receipt: 'ใบเสร็จรับเงิน' };
-export const ROLE_LABEL = { admin: 'ผู้ดูแลระบบ', shareholder: 'ผู้ถือหุ้น', director: 'กรรมการ', sales: 'ฝ่ายขาย', staff: 'พนักงาน' };
+export const ROLE_LABEL = { admin: 'ผู้ดูแลระบบ', shareholder: 'ผู้ถือหุ้น', director: 'กรรมการ', sales: 'พนักงานขาย', staff: 'พนักงาน' };
 // สิทธิ์ตามบทบาท (ต้องตรงกับ server/auth.js)
 export const WIDE = ['admin', 'shareholder', 'director']; // ดูได้ทั้งหมด
 export const SELL = ['admin', 'sales', 'staff']; // ขายงานได้

@@ -97,7 +97,9 @@ export function projectSummary(p) {
 
 // แบ่งผลประโยชน์: มูลค่างาน - ต้นทุนตรง - คอมมิชชันฝ่ายขาย = ยอดจัดสรร -> บริษัท + ทีมตามสัดส่วน
 export function computeSharing(project, settings = getSettings()) {
-  const { sales_percent, company_percent } = settings.sharing;
+  const { company_percent } = settings.sharing;
+  // พนักงานขาย: ใช้สัดส่วนที่ตั้งไว้ในโครงการ ถ้าไม่ได้ตั้งใช้ค่ากลางจากหน้าตั้งค่า
+  const sales_percent = project.sales_percent ?? settings.sharing.sales_percent;
   const sum = (sql, ...p) => q.get(sql, ...p).s ?? 0;
   const received = sum("SELECT SUM(amount) AS s FROM transactions WHERE project_id = ? AND type = 'income'", project.id);
   const direct = sum("SELECT SUM(amount) AS s FROM transactions WHERE project_id = ? AND type = 'expense' AND kind = 'general'", project.id);
@@ -167,6 +169,9 @@ router.get('/:id', requireAuth, (req, res) => {
   }).filter(Boolean);
   const out = { ...forRole(req.user, projectSummary(p)), tasks, roles, phases };
   if (seesAll(req.user)) out.sharing = computeSharing(p);
+  // พนักงานขายของโครงการ แสดงในตารางทีม (เปอร์เซ็นต์เห็นเฉพาะผู้ที่ดูผลประโยชน์ได้)
+  const seller = p.deal_id ? q.get('SELECT u.name FROM deals d JOIN users u ON u.id = d.sales_id WHERE d.id = ?', p.deal_id) : null;
+  out.sales = { user_name: seller?.name ?? null, percent: out.sharing ? out.sharing.sales_percent : null };
   res.json(out);
 });
 
@@ -187,7 +192,12 @@ router.put('/:id/roles', admin, (req, res) => {
   const p = findProject(req, res);
   if (!p) return;
   const roles = Array.isArray(req.body?.roles) ? req.body.roles : [];
+  const salesPct = Number(req.body?.sales_percent);
+  if ('sales_percent' in (req.body || {}) && !(salesPct >= 0 && salesPct <= 100)) {
+    return res.status(400).json({ error: 'สัดส่วนพนักงานขายต้องอยู่ระหว่าง 0–100%' });
+  }
   tx(() => {
+    if ('sales_percent' in (req.body || {})) q.run('UPDATE projects SET sales_percent = ? WHERE id = ?', salesPct, p.id);
     for (const r of roles) {
       const row = q.get('SELECT * FROM project_roles WHERE id = ? AND project_id = ?', r.id, p.id);
       if (!row) continue;
@@ -238,7 +248,9 @@ router.put('/:id/tasks/:taskId', requireAuth, (req, res) => {
   else if (status === 'todo' && progress > 0) status = 'doing';
 
   q.run(
-    'UPDATE tasks SET status = ?, progress = ?, assignee_id = ?, start_date = ?, due_date = ?, title = ?, weight = ? WHERE id = ?',
+    'UPDATE tasks SET phase = ?, position = ?, status = ?, progress = ?, assignee_id = ?, start_date = ?, due_date = ?, title = ?, weight = ? WHERE id = ?',
+    isAdmin && PHASES.some((x) => x.id === b.phase) ? b.phase : t.phase,
+    isAdmin && 'position' in b ? (POSITION_CODES.includes(b.position) ? b.position : null) : t.position,
     status, progress,
     isAdmin && 'assignee_id' in b ? (b.assignee_id ? Number(b.assignee_id) : null) : t.assignee_id,
     isAdmin && b.start_date ? b.start_date : t.start_date,

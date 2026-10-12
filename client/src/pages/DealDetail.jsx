@@ -4,13 +4,12 @@ import { api, date, DEAL_STATUS, DOC_TYPE, money, money2, num, phoneDigits, PROJ
 import { Badge, Bar, Field, Icon, Modal, RequirementChecklist, Tabs, useApp, useData } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 
-const STEPS = [['draft', 'รับ Requirement'], ['analyzed', 'ประเมินราคา'], ['quoted', 'เสนอราคา'], ['won', 'ปิดการขาย']];
 const FEAS_COLOR = { go: 'var(--ok)', conditional: '#d39a1c', 'no-go': 'var(--danger)' };
 const tone = (score) => (score >= 75 ? 'ok' : score >= 50 ? 'warn' : 'danger');
 
 export default function DealDetail() {
   const { id } = useParams();
-  const { user, run } = useApp();
+  const { user, run, meta } = useApp();
   const [deal, reload, setDeal] = useData(`/deals/${id}`);
   const [tab, setTab] = useState('requirement');
   const [busy, setBusy] = useState('');
@@ -21,7 +20,8 @@ export default function DealDetail() {
   const isAdmin = user.role === 'admin';
   const canSell = SELL.includes(user.role); // ผู้ถือหุ้น/กรรมการดูได้อย่างเดียว
   const closed = deal.status === 'won' || deal.status === 'lost';
-  const stepIndex = STEPS.findIndex(([s]) => s === deal.status);
+  const steps = meta.sales_steps;
+  const stepIndex = steps.findIndex((s) => s.id === deal.step);
 
   // เรียก action ที่คืน deal ทั้งก้อนกลับมา
   const act = async (name, fn, ok) => {
@@ -58,12 +58,21 @@ export default function DealDetail() {
 
       {deal.status !== 'lost' && (
         <div className="steps" style={{ marginBottom: 22 }}>
-          {STEPS.map(([s, label], i) => (
-            <div key={s} className={`step ${i < stepIndex || deal.status === 'won' ? 'done' : i === stepIndex ? 'now' : ''}`}>
-              <b>{i < stepIndex || deal.status === 'won' ? <span style={{ width: 12, display: 'grid' }}><Icon name="check" /></span> : i + 1}</b>
-              {label}
-            </div>
-          ))}
+          {steps.map((s, i) => {
+            const done = i < stepIndex || deal.status === 'won';
+            // กดที่ขั้นตอนเพื่อย้ายงานไปขั้นนั้นได้ ยกเว้นขั้นปิดการขายซึ่งต้องใช้ปุ่มปิดการขาย
+            const movable = canSell && !closed && s.id !== 'won' && i !== stepIndex;
+            return (
+              <div key={s.id} className="step-wrap">
+                <button className={`step ${done ? 'done' : i === stepIndex ? 'now' : ''}`} disabled={!movable || Boolean(busy)}
+                  title={movable ? `ย้ายงานไปขั้น “${s.label}”` : undefined}
+                  onClick={() => act('step', () => api.put(`/deals/${id}/step`, { step: s.id }), `ย้ายไปขั้น “${s.label}” แล้ว`)}>
+                  <b>{done ? <span style={{ width: 12, display: 'grid' }}><Icon name="check" /></span> : i + 1}</b>
+                  {s.label}
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -84,7 +93,8 @@ export default function DealDetail() {
           onSave={(body) => act('estimate', () => api.put(`/deals/${id}/estimate`, body), 'บันทึกการประเมินแล้ว')} />
       )}
       {tab === 'demo' && (
-        <DemoTab deal={deal} canSell={canSell} busy={busy} onGenerate={() => act('demo', () => api.post(`/deals/${id}/demo`), 'สร้าง Demo แล้ว')} />
+        <DemoTab deal={deal} canSell={canSell} isAdmin={isAdmin} busy={busy}
+          onSaveLink={(url) => act('link', () => api.put(`/deals/${id}/demo-link`, { url }), url ? 'บันทึกลิงก์ Demo แล้ว' : 'ลบลิงก์ Demo แล้ว')} onGenerate={() => act('demo', () => api.post(`/deals/${id}/demo`), 'สร้าง Demo แล้ว')} />
       )}
       {tab === 'docs' && <DocsTab deal={deal} isAdmin={isAdmin} canSell={canSell} busy={busy} act={act} reload={reload} close={close} setClose={setClose} />}
     </>
@@ -303,10 +313,37 @@ function EstimateTab({ deal, isAdmin, canSell, busy, onSave, onAnalyze }) {
   );
 }
 
-function DemoTab({ deal, canSell, busy, onGenerate }) {
+function DemoTab({ deal, canSell, isAdmin, busy, onGenerate, onSaveLink }) {
+  const { toast } = useApp();
   const [full, setFull] = useState(false);
+  const [link, setLink] = useState(deal.demo_url ?? '');
+  useEffect(() => setLink(deal.demo_url ?? ''), [deal.demo_url]);
   const canGenerate = canSell && deal.items.length > 0;
+  const copy = () => navigator.clipboard.writeText(deal.demo_url).then(() => toast('คัดลอกลิงก์แล้ว'), () => toast('คัดลอกไม่สำเร็จ กรุณาคัดลอกจากช่องลิงก์', 'error'));
   return (
+    <div className="stack">
+    <div className="card">
+      <div className="card-head">
+        <div>
+          <h2>ลิงก์ Demo สำหรับนำเสนอลูกค้า</h2>
+          <p className="small muted">ผู้ดูแลระบบแนบลิงก์ Demo ที่เตรียมไว้ พนักงานขายเปิดหรือคัดลอกไปส่งให้ลูกค้าได้</p>
+        </div>
+      </div>
+      {deal.demo_url ? (
+        <div className="row" style={{ flexWrap: 'nowrap' }}>
+          <a href={deal.demo_url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{deal.demo_url}</a>
+          <a className="btn primary" href={deal.demo_url} target="_blank" rel="noopener noreferrer">เปิดลิงก์</a>
+          <button className="btn" onClick={copy}>คัดลอกลิงก์</button>
+        </div>
+      ) : <p className="muted">{isAdmin ? 'ยังไม่ได้แนบลิงก์ — วางลิงก์ด้านล่างแล้วกดบันทึก' : 'ผู้ดูแลระบบยังไม่ได้แนบลิงก์ Demo สำหรับงานนี้'}</p>}
+      {isAdmin && (
+        <div className="row" style={{ flexWrap: 'nowrap', marginTop: 14 }}>
+          <input type="url" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://demo.example.com" aria-label="ลิงก์ Demo" />
+          <button className="btn primary" disabled={Boolean(busy) || link.trim() === (deal.demo_url ?? '')} onClick={() => onSaveLink(link.trim())}>{deal.demo_url ? 'อัปเดตลิงก์' : 'บันทึกลิงก์'}</button>
+          {deal.demo_url && <button className="btn ghost danger" disabled={Boolean(busy)} onClick={() => onSaveLink('')}>ลบลิงก์</button>}
+        </div>
+      )}
+    </div>
     <div className="card">
       <div className="card-head">
         <div>
@@ -331,6 +368,7 @@ function DemoTab({ deal, canSell, busy, onGenerate }) {
           </div>
         </div>
       ) : (canGenerate || !canSell) && <div className="empty">ยังไม่ได้สร้าง Demo</div>}
+    </div>
     </div>
   );
 }

@@ -105,8 +105,10 @@ function Tasks({ p, reload }) {
   const update = async (t, patch) => {
     if (await run(() => api.put(`/projects/${p.id}/tasks/${t.id}`, patch))) reload();
   };
+  // ฟอร์มเดียวใช้ทั้งเพิ่มงานใหม่และแก้ไขงานเดิม (มี id = แก้ไข)
   const add = async () => {
-    if (await run(() => api.post(`/projects/${p.id}/tasks`, form), 'เพิ่มงานแล้ว')) {
+    const call = form.id ? () => api.put(`/projects/${p.id}/tasks/${form.id}`, form) : () => api.post(`/projects/${p.id}/tasks`, form);
+    if (await run(call, form.id ? 'แก้ไขงานแล้ว' : 'เพิ่มงานแล้ว')) {
       setForm(null);
       reload();
     }
@@ -160,7 +162,12 @@ function Tasks({ p, reload }) {
                             <span className="num small" style={{ width: 36, textAlign: 'right' }}>{t.progress}%</span>
                           </div>
                         </td>
-                        {isAdmin && <td><button className="btn ghost danger sm" onClick={() => remove(t)} aria-label="ลบงาน"><Icon name="trash" /></button></td>}
+                        {isAdmin && (
+                          <td className="nowrap right">
+                            <button className="btn ghost sm" onClick={() => setForm({ id: t.id, title: t.title, phase: t.phase, position: t.position ?? '', assignee_id: t.assignee_id ?? '', start_date: t.start_date ?? '', due_date: t.due_date ?? '', weight: t.weight })}>แก้ไข</button>
+                            <button className="btn ghost danger sm" onClick={() => remove(t)} aria-label="ลบงาน"><Icon name="trash" /></button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -173,7 +180,7 @@ function Tasks({ p, reload }) {
       {mine && !p.tasks.some((t) => t.assignee_id === user.id) && <div className="card empty">ยังไม่มีงานที่มอบหมายให้คุณในโครงการนี้</div>}
 
       {form && (
-        <Modal title="เพิ่มงาน" onClose={() => setForm(null)} footer={<><button className="btn" onClick={() => setForm(null)}>ยกเลิก</button><button className="btn primary" onClick={add}>เพิ่มงาน</button></>}>
+        <Modal title={form.id ? 'แก้ไขงาน' : 'เพิ่มงาน'} onClose={() => setForm(null)} footer={<><button className="btn" onClick={() => setForm(null)}>ยกเลิก</button><button className="btn primary" onClick={add}>{form.id ? 'บันทึก' : 'เพิ่มงาน'}</button></>}>
           <div className="stack">
             <Field label="ชื่องาน"><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus /></Field>
             <div className="grid g2">
@@ -194,13 +201,17 @@ function Tasks({ p, reload }) {
 function Team({ p, reload, isAdmin }) {
   const { meta, run } = useApp();
   const [rows, setRows] = useState(null);
+  const [salesPct, setSalesPct] = useState(null); // null = ยังไม่ได้แก้
   const list = rows ?? p.roles;
+  const dirty = rows !== null || salesPct !== null;
+  const cancel = () => { setRows(null); setSalesPct(null); };
   const set = (id, patch) => setRows(list.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const sum = (k) => Math.round(list.reduce((s, r) => s + (Number(r[k]) || 0), 0) * 10) / 10;
 
   const save = async () => {
-    if (await run(() => api.put(`/projects/${p.id}/roles`, { roles: list }), 'บันทึกทีมและสัดส่วนแล้ว')) {
-      setRows(null);
+    const body = salesPct === null ? { roles: list } : { roles: list, sales_percent: salesPct };
+    if (await run(() => api.put(`/projects/${p.id}/roles`, body), 'บันทึกทีมและสัดส่วนแล้ว')) {
+      cancel();
       reload();
     }
   };
@@ -210,14 +221,26 @@ function Team({ p, reload, isAdmin }) {
       <div className="card-head">
         <div>
           <h2>ทีมและสัดส่วนงานตามตำแหน่ง</h2>
-          <p className="small muted">% งาน คำนวณจาก man-day ในใบเสนอราคา · % ผลประโยชน์ ใช้แบ่งส่วนของทีม (ปรับแยกจาก % งานได้)</p>
+          <p className="small muted">% งาน คำนวณจาก man-day ในใบเสนอราคา · % ผลประโยชน์ ใช้แบ่งส่วนของทีม (ปรับแยกจาก % งานได้) · พนักงานขายคิดเป็น % ของมูลค่างาน แยกจากส่วนของทีม</p>
         </div>
-        {rows && <div className="row"><button className="btn sm" onClick={() => setRows(null)}>ยกเลิก</button><button className="btn primary sm" onClick={save}>บันทึก</button></div>}
+        {dirty && <div className="row"><button className="btn sm" onClick={cancel}>ยกเลิก</button><button className="btn primary sm" onClick={save}>บันทึก</button></div>}
       </div>
       <div className="table-wrap">
         <table>
           <thead><tr><th>ตำแหน่ง</th><th>ผู้รับผิดชอบ</th><th className="right">man-day</th><th className="right" style={{ width: 130 }}>% งาน</th><th className="right" style={{ width: 150 }}>% ผลประโยชน์</th></tr></thead>
           <tbody>
+            <tr>
+              <td>พนักงานขาย<div className="small muted">SALE · ผู้ปิดการขาย</div></td>
+              <td>{p.sales?.user_name ?? <span className="muted">ยังไม่ระบุ</span>}</td>
+              <td className="right muted">—</td>
+              <td className="right muted">—</td>
+              <td className="right num">
+                {p.sales?.percent == null ? <span className="muted">—</span> : isAdmin ? (
+                  <input className="inline-input" type="number" min="0" max="100" step="0.1" value={salesPct ?? p.sales.percent} onChange={(e) => setSalesPct(e.target.value)} aria-label="% ผลประโยชน์พนักงานขาย" />
+                ) : `${p.sales.percent}%`}
+                {p.sales?.percent != null && <div className="small muted">ของมูลค่างาน</div>}
+              </td>
+            </tr>
             {list.map((r) => (
               <tr key={r.id}>
                 <td>{meta.positions.find((x) => x.code === r.position)?.name ?? r.position}<div className="small muted">{r.position}</div></td>
@@ -236,7 +259,7 @@ function Team({ p, reload, isAdmin }) {
             ))}
           </tbody>
           <tfoot>
-            <tr><td colSpan={2}>รวม</td><td className="right num">{sum('days')}</td><td className="right num">{sum('percent')}%</td><td className="right num">{sum('share_percent')}%</td></tr>
+            <tr><td colSpan={2}>รวมทีม (ไม่รวมพนักงานขาย)</td><td className="right num">{sum('days')}</td><td className="right num">{sum('percent')}%</td><td className="right num">{sum('share_percent')}%</td></tr>
           </tfoot>
         </table>
       </div>

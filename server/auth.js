@@ -46,7 +46,7 @@ export function clearSession(res) {
 }
 
 export function publicUser(u) {
-  return u && { id: u.id, name: u.name, email: u.email, role: u.role, position: u.position, active: u.active };
+  return u && { id: u.id, name: u.name, email: u.email, role: u.role, position: u.position, phone: u.phone, active: u.active };
 }
 
 export function attachUser(req, _res, next) {
