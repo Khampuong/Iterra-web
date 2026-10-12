@@ -1,0 +1,388 @@
+import { Router } from 'express';
+import { q, tx, getSettings, nextCode, today, addDays, addBusinessDays, notify } from '../db.js';
+import { PROJECT_ROLES, requireRole, seesAll, SELL_ROLES, WIDE_ROLES } from '../auth.js';
+import { priceItem, dealTotals, feasibility, suggestDuration, cleanEffort, fallbackAnalyze, parseChecks, REQUIREMENT_OPTIONS } from '../estimator.js';
+import { fallbackDemo } from '../demo-template.js';
+import { analyzeRequirement, generateDemo, AiUnavailable } from '../ai.js';
+import { createProjectFromDeal } from './projects.js';
+
+const router = Router();
+const sales = requireRole(...SELL_ROLES); // ขายงานได้
+const view = requireRole(...SELL_ROLES, ...WIDE_ROLES); // ดูงานขายได้
+const admin = requireRole('admin');
+
+const FIELDS = [
+  'title', 'customer_name', 'customer_company', 'customer_email', 'customer_phone',
+  'customer_tax_id', 'customer_address', 'project_type', 'budget', 'deadline', 'requirement', 'requirement_checks',
+];
+const CLOSED = ['won', 'lost'];
+
+// เบอร์โทรศัพท์ลูกค้า: เก็บเฉพาะตัวเลข ไม่เกิน 10 หลัก (คืน false ถ้าเกิน)
+function normalizePhone(b) {
+  if (b.customer_phone == null || b.customer_phone === '') return true;
+  const digits = String(b.customer_phone).replace(/\D/g, '');
+  if (digits.length > 10) return false;
+  b.customer_phone = digits;
+  return true;
+}
+
+// เช็คลิสต์ Requirement: เก็บเป็น JSON เฉพาะรหัสที่มีในระบบ
+function normalizeChecks(b) {
+  if (!('requirement_checks' in b)) return;
+  const known = REQUIREMENT_OPTIONS.map((o) => o.id);
+  const list = Array.isArray(b.requirement_checks) ? b.requirement_checks.filter((id) => known.includes(id)) : [];
+  b.requirement_checks = JSON.stringify([...new Set(list)]);
+}
+
+function adminIds() {
+  return q.all("SELECT id FROM users WHERE role = 'admin' AND active = 1").map((u) => u.id);
+}
+
+function canSee(user, deal) {
+  return seesAll(user) || deal.sales_id === user.id;
+}
+
+function findDeal(req, res) {
+  const deal = q.get('SELECT * FROM deals WHERE id = ?', req.params.id);
+  if (!deal) return res.status(404).json({ error: 'ไม่พบงานขายนี้' }) && null;
+  if (!canSee(req.user, deal)) return res.status(403).json({ error: 'ไม่มีสิทธิ์ดูงานขายนี้' }) && null;
+  return deal;
+}
+
+function pricedItems(dealId, settings) {
+  return q.all('SELECT * FROM deal_items WHERE deal_id = ? ORDER BY sort, id', dealId).map((i) => priceItem(i, settings));
+}
+
+export function loadDeal(deal, { withDemo = true } = {}) {
+  const settings = getSettings();
+  const items = pricedItems(deal.id, settings);
+  const totals = dealTotals(items, deal, settings);
+  const { demo_html, analysis, ...rest } = deal;
+  return {
+    ...rest,
+    analysis: analysis ? JSON.parse(analysis) : null,
+    requirement_checks: parseChecks(deal),
+    has_demo: Boolean(demo_html),
+    ...(withDemo ? { demo_html } : {}),
+    items,
+    totals,
+    feasibility: feasibility(deal, totals, settings),
+    sales_name: q.get('SELECT name FROM users WHERE id = ?', deal.sales_id)?.name ?? null,
+    documents: q.all(
+      'SELECT id, type, number, issued_at, due_at, amount, status, ref_id FROM documents WHERE deal_id = ? ORDER BY id',
+      deal.id,
+    ),
+    project: q.get('SELECT id, code, status FROM projects WHERE deal_id = ?', deal.id) ?? null,
+  };
+}
+
+function replaceItems(dealId, items) {
+  q.run('DELETE FROM deal_items WHERE deal_id = ?', dealId);
+  items.forEach((it, i) => {
+    const override = it.price_override === '' || it.price_override == null ? null : Number(it.price_override);
+    q.run(
+      'INSERT INTO deal_items (deal_id, sort, title, description, effort, price_override) VALUES (?, ?, ?, ?, ?, ?)',
+      dealId, i, String(it.title || 'รายการ').slice(0, 200), String(it.description || ''),
+      JSON.stringify(cleanEffort(it.effort)), Number.isFinite(override) ? override : null,
+    );
+  });
+}
+
+// ข้อมูลที่ "แช่แข็ง" ลงในเอกสาร ณ วันที่ออก
+function snapshot(deal, settings) {
+  const items = pricedItems(deal.id, settings);
+  const totals = dealTotals(items, deal, settings);
+  return {
+    company: settings.company,
+    customer: {
+      name: deal.customer_name, company: deal.customer_company, email: deal.customer_email,
+      phone: deal.customer_phone, tax_id: deal.customer_tax_id, address: deal.customer_address,
+    },
+    deal: { code: deal.code, title: deal.title, duration_days: deal.duration_days },
+    items: items.map((i) => ({ title: i.title, description: i.description, days: i.days, price: i.price })),
+    totals,
+    payment_terms: settings.payment_terms,
+    sales: q.get('SELECT name, email FROM users WHERE id = ?', deal.sales_id) ?? null,
+  };
+}
+
+function createDocument(deal, type, prefix, { amount, due_at = null, ref_id = null, data, status = 'issued', issued_at = today() }) {
+  const number = nextCode('documents', 'number', prefix);
+  const r = q.run(
+    'INSERT INTO documents (deal_id, type, number, issued_at, due_at, amount, status, ref_id, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    deal.id, type, number, issued_at, due_at, amount, status, ref_id, JSON.stringify(data),
+  );
+  return { id: Number(r.lastInsertRowid), number };
+}
+
+function issueQuotation(deal, settings) {
+  const data = snapshot(deal, settings);
+  data.valid_until = addDays(today(), settings.pricing.quote_valid_days);
+  q.run("UPDATE documents SET status = 'void' WHERE deal_id = ? AND type = 'quotation' AND status = 'issued'", deal.id);
+  return createDocument(deal, 'quotation', 'QT', { amount: data.totals.total, due_at: data.valid_until, data });
+}
+
+// ---------- routes ----------
+// รายชื่อลูกค้าเดิมในระบบ ใช้เติมข้อมูลผู้ติดต่อตอนเปิดงานขายใหม่
+router.get('/customers', sales, (_req, res) => {
+  const seen = new Set();
+  const out = [];
+  for (const d of q.all('SELECT customer_name, customer_company, customer_phone, customer_email, customer_tax_id, customer_address FROM deals ORDER BY id DESC')) {
+    const key = `${(d.customer_company || '').trim().toLowerCase()}|${d.customer_name.trim().toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(d);
+  }
+  res.json(out);
+});
+
+router.get('/', view, (req, res) => {
+  const settings = getSettings();
+  const rows = seesAll(req.user)
+    ? q.all('SELECT * FROM deals ORDER BY id DESC')
+    : q.all('SELECT * FROM deals WHERE sales_id = ? ORDER BY id DESC', req.user.id);
+  res.json(rows.map((d) => {
+    const items = pricedItems(d.id, settings);
+    const totals = dealTotals(items, d, settings);
+    return {
+      id: d.id, code: d.code, title: d.title, customer_name: d.customer_name, customer_company: d.customer_company,
+      status: d.status, deadline: d.deadline, created_at: d.created_at, duration_days: d.duration_days,
+      net: totals.net, feasibility: items.length ? feasibility(d, totals, settings).score : null,
+      sales_name: q.get('SELECT name FROM users WHERE id = ?', d.sales_id)?.name ?? null,
+    };
+  }));
+});
+
+router.post('/', sales, (req, res) => {
+  const b = req.body || {};
+  if (!normalizePhone(b)) return res.status(400).json({ error: 'เบอร์โทรศัพท์ต้องเป็นตัวเลขไม่เกิน 10 หลัก' });
+  normalizeChecks(b);
+  if (!b.title?.trim() || !b.customer_name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่องานและชื่อลูกค้า' });
+  const code = nextCode('deals', 'code', 'DL');
+  const r = q.run(
+    `INSERT INTO deals (code, sales_id, ${FIELDS.join(', ')}) VALUES (?, ?, ${FIELDS.map(() => '?').join(', ')})`,
+    code, req.user.id, ...FIELDS.map((f) => (b[f] === '' || b[f] == null ? (f === 'requirement' ? '' : f === 'requirement_checks' ? '[]' : null) : b[f])),
+  );
+  res.status(201).json({ id: Number(r.lastInsertRowid), code });
+});
+
+router.get('/:id', view, (req, res) => {
+  const deal = findDeal(req, res);
+  if (deal) res.json(loadDeal(deal));
+});
+
+// ฝ่ายขายแก้ข้อมูลลูกค้า/Requirement ได้จนกว่าจะปิดงาน ส่วน admin แก้ได้เสมอ
+router.put('/:id', sales, (req, res) => {
+  const deal = findDeal(req, res);
+  if (!deal) return;
+  if (CLOSED.includes(deal.status) && req.user.role !== 'admin') return res.status(409).json({ error: 'งานนี้ปิดแล้ว แก้ไขไม่ได้' });
+  const b = req.body || {};
+  if (!normalizePhone(b)) return res.status(400).json({ error: 'เบอร์โทรศัพท์ต้องเป็นตัวเลขไม่เกิน 10 หลัก' });
+  normalizeChecks(b);
+  const sets = FIELDS.filter((f) => f in b);
+  if (sets.length) {
+    q.run(
+      `UPDATE deals SET ${sets.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`,
+      ...sets.map((f) => (b[f] === '' ? (f === 'requirement' ? '' : null) : b[f])), deal.id,
+    );
+  }
+  res.json(loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)));
+});
+
+router.delete('/:id', admin, (req, res) => {
+  const deal = findDeal(req, res);
+  if (!deal) return;
+  if (deal.status === 'won') return res.status(409).json({ error: 'งานที่ปิดการขายแล้วลบไม่ได้' });
+  q.run('DELETE FROM deals WHERE id = ?', deal.id);
+  res.json({ ok: true });
+});
+
+// วิเคราะห์ Requirement -> รายการงาน + man-day + ระยะเวลา
+router.post('/:id/analyze', sales, async (req, res, next) => {
+  try {
+    const deal = findDeal(req, res);
+    if (!deal) return;
+    if (CLOSED.includes(deal.status)) return res.status(409).json({ error: 'งานนี้ปิดแล้ว' });
+    if (!deal.requirement.trim() && !parseChecks(deal).length) return res.status(400).json({ error: 'กรุณาเลือกเช็คลิสต์หรือกรอกข้อมูลเพิ่มเติมก่อนวิเคราะห์' });
+
+    let result;
+    let notice = null;
+    try {
+      result = await analyzeRequirement(deal);
+    } catch (err) {
+      if (!(err instanceof AiUnavailable)) throw err;
+      result = fallbackAnalyze(deal);
+      notice = `${err.message} — ใช้การประเมินเบื้องต้นจากคำสำคัญแทน`;
+    }
+
+    const settings = getSettings();
+    const { items, duration_days, ...analysis } = result;
+    tx(() => {
+      replaceItems(deal.id, items);
+      const priced = pricedItems(deal.id, settings);
+      const total = dealTotals(priced, deal, settings).days;
+      const duration = Math.round(duration_days) > 0 ? Math.round(duration_days) : suggestDuration(total, settings);
+      q.run(
+        "UPDATE deals SET analysis = ?, duration_days = ?, status = CASE WHEN status = 'draft' THEN 'analyzed' ELSE status END WHERE id = ?",
+        JSON.stringify({ ...analysis, analyzed_at: new Date().toISOString() }), duration, deal.id,
+      );
+    });
+    res.json({ ...loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)), notice });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// สร้างหน้า Demo ตาม Requirement
+router.post('/:id/demo', sales, async (req, res, next) => {
+  try {
+    const deal = findDeal(req, res);
+    if (!deal) return;
+    const settings = getSettings();
+    const items = pricedItems(deal.id, settings);
+    if (!items.length) return res.status(400).json({ error: 'กรุณาวิเคราะห์ Requirement ก่อนสร้าง Demo' });
+
+    let out;
+    let notice = null;
+    try {
+      out = await generateDemo(deal, items);
+    } catch (err) {
+      if (!(err instanceof AiUnavailable)) throw err;
+      out = { html: fallbackDemo(deal, items), source: 'fallback' };
+      notice = `${err.message} — แสดงโครงหน้าจอตัวอย่างแทน`;
+    }
+    q.run('UPDATE deals SET demo_html = ?, demo_source = ? WHERE id = ?', out.html, out.source, deal.id);
+    res.json({ ...loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)), notice });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// admin ปรับรายการงาน ราคา ส่วนลด และระยะเวลาก่อนรับงาน
+router.put('/:id/estimate', admin, (req, res) => {
+  const deal = findDeal(req, res);
+  if (!deal) return;
+  if (deal.status === 'won') return res.status(409).json({ error: 'ปิดการขายแล้ว แก้ราคาไม่ได้' });
+  const { items, discount, duration_days } = req.body || {};
+  if (!Array.isArray(items)) return res.status(400).json({ error: 'รูปแบบรายการงานไม่ถูกต้อง' });
+  tx(() => {
+    replaceItems(deal.id, items);
+    q.run(
+      "UPDATE deals SET discount = ?, duration_days = ?, status = CASE WHEN status = 'draft' THEN 'analyzed' ELSE status END WHERE id = ?",
+      Math.max(0, Number(discount) || 0), Math.max(0, Math.round(Number(duration_days) || 0)), deal.id,
+    );
+  });
+  res.json(loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)));
+});
+
+// ออกใบเสนอราคา
+router.post('/:id/quote', sales, (req, res) => {
+  const deal = findDeal(req, res);
+  if (!deal) return;
+  if (CLOSED.includes(deal.status)) return res.status(409).json({ error: 'งานนี้ปิดแล้ว' });
+  const settings = getSettings();
+  if (!pricedItems(deal.id, settings).length) return res.status(400).json({ error: 'ยังไม่มีรายการงานสำหรับออกใบเสนอราคา' });
+  tx(() => {
+    issueQuotation(deal, settings);
+    q.run("UPDATE deals SET status = 'quoted' WHERE id = ?", deal.id);
+  });
+  res.json(loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)));
+});
+
+// ปิดงาน: won -> ออกสัญญา + ใบแจ้งหนี้ตามงวด + เปิดโครงการ
+router.post('/:id/close', sales, (req, res) => {
+  const deal = findDeal(req, res);
+  if (!deal) return;
+  if (CLOSED.includes(deal.status)) return res.status(409).json({ error: 'งานนี้ปิดไปแล้ว' });
+  const { result, start_date, note } = req.body || {};
+
+  if (result === 'lost') {
+    q.run("UPDATE deals SET status = 'lost', closed_at = datetime('now'), close_note = ? WHERE id = ?", note || null, deal.id);
+    return res.json(loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)));
+  }
+  if (result !== 'won') return res.status(400).json({ error: 'ระบุผลการปิดงานไม่ถูกต้อง' });
+
+  const settings = getSettings();
+  const items = pricedItems(deal.id, settings);
+  const totals = dealTotals(items, deal, settings);
+  if (!items.length || totals.net <= 0) return res.status(400).json({ error: 'ต้องมีรายการงานและราคาก่อนปิดการขาย' });
+  if (deal.duration_days <= 0) return res.status(400).json({ error: 'กรุณาให้ admin กำหนดระยะเวลาทำงานก่อนปิดการขาย' });
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(start_date || '') ? start_date : today();
+
+  const projectId = tx(() => {
+    const hasQuote = q.get("SELECT id FROM documents WHERE deal_id = ? AND type = 'quotation' AND status = 'issued'", deal.id);
+    if (!hasQuote) issueQuotation(deal, settings);
+
+    const end = addBusinessDays(start, deal.duration_days);
+    const base = { ...snapshot(deal, settings), start_date: start, end_date: end };
+    createDocument(deal, 'contract', 'CT', { amount: totals.total, data: base });
+
+    // ใบแจ้งหนี้ตามงวด — งวดสุดท้ายรับเศษที่เหลือ
+    const terms = settings.payment_terms.filter((t) => t.percent > 0);
+    let usedNet = 0;
+    terms.forEach((t, i) => {
+      const last = i === terms.length - 1;
+      const net = last ? totals.net - usedNet : Math.round(totals.net * t.percent) / 100;
+      usedNet += net;
+      const vat = Math.round(net * totals.vat_percent) / 100;
+      const due = i === 0 ? addBusinessDays(start, 5) : last ? addBusinessDays(end, 5) : addBusinessDays(start, Math.round((deal.duration_days * i) / (terms.length - 1)));
+      createDocument(deal, 'invoice', 'INV', {
+        amount: net + vat, due_at: due,
+        data: { ...base, installment: { no: i + 1, of: terms.length, label: t.label, percent: t.percent, net, vat, total: net + vat } },
+      });
+    });
+
+    q.run("UPDATE deals SET status = 'won', closed_at = datetime('now'), close_note = ? WHERE id = ?", note || null, deal.id);
+    const pid = createProjectFromDeal(deal, items, totals, start, end);
+    for (const uid of new Set([...adminIds(), deal.sales_id])) {
+      // ผู้ที่ดูโครงการไม่ได้ (ฝ่ายขาย) ให้ลิงก์กลับไปที่งานขาย
+      const role = q.get('SELECT role FROM users WHERE id = ?', uid)?.role;
+      const link = PROJECT_ROLES.includes(role) ? `/projects/${pid}` : `/deals/${deal.id}`;
+      notify({ user_id: uid, title: `ปิดการขาย ${deal.code}`, body: `${deal.title} — เปิดโครงการและออกเอกสารแล้ว`, link });
+    }
+    return pid;
+  });
+
+  res.json({ ...loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)), project_id: projectId });
+});
+
+// ---------- เอกสาร ----------
+export const documents = Router();
+
+documents.get('/:id', view, (req, res) => {
+  const doc = q.get('SELECT * FROM documents WHERE id = ?', req.params.id);
+  if (!doc) return res.status(404).json({ error: 'ไม่พบเอกสาร' });
+  const deal = q.get('SELECT * FROM deals WHERE id = ?', doc.deal_id);
+  if (!canSee(req.user, deal)) return res.status(403).json({ error: 'ไม่มีสิทธิ์ดูเอกสารนี้' });
+  const ref = doc.ref_id ? q.get('SELECT number FROM documents WHERE id = ?', doc.ref_id) : null;
+  res.json({ ...doc, data: JSON.parse(doc.data), ref_number: ref?.number ?? null });
+});
+
+// รับชำระใบแจ้งหนี้ -> ออกใบเสร็จรับเงิน + บันทึกรายรับ (ยอดก่อน VAT)
+documents.post('/:id/pay', admin, (req, res) => {
+  const inv = q.get("SELECT * FROM documents WHERE id = ? AND type = 'invoice'", req.params.id);
+  if (!inv) return res.status(404).json({ error: 'ไม่พบใบแจ้งหนี้' });
+  if (inv.status !== 'issued') return res.status(409).json({ error: 'ใบแจ้งหนี้นี้รับชำระแล้วหรือถูกยกเลิก' });
+  const deal = q.get('SELECT * FROM deals WHERE id = ?', inv.deal_id);
+  const data = JSON.parse(inv.data);
+  const paidAt = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.date || '') ? req.body.date : today();
+  const project = q.get('SELECT id FROM projects WHERE deal_id = ?', deal.id);
+
+  const receipt = tx(() => {
+    q.run("UPDATE documents SET status = 'paid' WHERE id = ?", inv.id);
+    const r = createDocument(deal, 'receipt', 'RC', {
+      amount: inv.amount, ref_id: inv.id, status: 'paid', issued_at: paidAt,
+      data: { ...data, paid_at: paidAt, method: req.body?.method || 'โอนเงิน' },
+    });
+    q.run(
+      "INSERT INTO transactions (project_id, type, category, amount, date, note, document_id) VALUES (?, 'income', 'รับชำระค่างาน', ?, ?, ?, ?)",
+      project?.id ?? null, data.installment.net, paidAt,
+      `${inv.number} ${data.installment.label} (VAT ${data.installment.vat.toLocaleString('th-TH')} บาท แยกต่างหาก)`, r.id,
+    );
+    if (deal.sales_id) notify({ user_id: deal.sales_id, title: `รับชำระ ${inv.number}`, body: deal.title, link: `/deals/${deal.id}` });
+    return r;
+  });
+  res.json(receipt);
+});
+
+export default router;

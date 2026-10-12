@@ -1,0 +1,171 @@
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { api } from '../lib.js';
+
+const PATHS = {
+  grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  deal: 'M4 8h16v11H4zM9 8V5h6v3M4 13h16',
+  layers: 'M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5',
+  wallet: 'M3 7h16a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7zm0 0V6a2 2 0 012-2h11M16 13h2',
+  pie: 'M12 3v9h9a9 9 0 11-9-9zM15 3.5A9 9 0 0120.5 9H15z',
+  cog: 'M12 9a3 3 0 100 6 3 3 0 000-6zM4 12h2m12 0h2M12 4v2m0 12v2M6.3 6.3l1.4 1.4m8.6 8.6l1.4 1.4M6.3 17.7l1.4-1.4m8.6-8.6l1.4-1.4',
+  users: 'M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM2.5 20a6.5 6.5 0 0113 0M16 4.3a3.5 3.5 0 010 6.4M18 14.2a6.5 6.5 0 013.5 5.8',
+  bell:'M6 16V11a6 6 0 1112 0v5l1.5 2h-15zM10 20a2 2 0 004 0',
+  plus: 'M12 5v14M5 12h14',
+  print: 'M7 8V4h10v4M7 17H5a1 1 0 01-1-1v-6a1 1 0 011-1h14a1 1 0 011 1v6a1 1 0 01-1 1h-2M7 14h10v6H7z',
+  spark: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z',
+  check: 'M5 12.5l4.5 4.5L19 7.5',
+  out: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10',
+  trash: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13',
+  expand: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
+};
+
+export function Icon({ name }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={PATHS[name]} />
+    </svg>
+  );
+}
+
+export function Badge({ tone = '', children }) {
+  return <span className={`badge ${tone}`}>{children}</span>;
+}
+
+export function Bar({ value, tone = '' }) {
+  return (
+    <div className={`bar ${tone}`} role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100}>
+      <i style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+    </div>
+  );
+}
+
+export function Stat({ label, value, hint, hero }) {
+  return (
+    <div className={`card stat${hero ? ' hero' : ''}`}>
+      <div className="label">{label}</div>
+      <div className="value num">{value}</div>
+      {hint && <div className="hint">{hint}</div>}
+    </div>
+  );
+}
+
+export function Field({ label, children, style }) {
+  return (
+    <label className="field" style={style}>
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// เช็คลิสต์ Requirement: ติ๊กสิ่งที่ลูกค้าต้องการ (value = array ของรหัส)
+export function RequirementChecklist({ value = [], onChange, disabled }) {
+  const { meta } = useApp();
+  const toggle = (id) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  return (
+    <div className="checklist" role="group" aria-label="เช็คลิสต์ Requirement">
+      {meta.requirement_options.map((o) => (
+        <label key={o.id} className={`check${value.includes(o.id) ? ' on' : ''}`}>
+          <input type="checkbox" checked={value.includes(o.id)} disabled={disabled} onChange={() => toggle(o.id)} />
+          <span><b>{o.title}</b><small>{o.desc}</small></span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+export function Modal({ title, onClose, children, footer, wide }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className={`modal${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
+        <h2>{title}</h2>
+        {children}
+        {footer && <div className="modal-foot">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+export function Tabs({ tabs, value, onChange }) {
+  return (
+    <div className="tabs" role="tablist">
+      {tabs.map(([id, label]) => (
+        <button key={id} role="tab" aria-selected={value === id} className={`tab${value === id ? ' active' : ''}`} onClick={() => onChange(id)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------- context: ผู้ใช้ + ข้อมูลอ้างอิง + toast ----------
+const AppCtx = createContext(null);
+export const useApp = () => useContext(AppCtx);
+
+export function AppProvider({ children }) {
+  const [user, setUser] = useState(undefined); // undefined = กำลังโหลด
+  const [meta, setMeta] = useState(null);
+  const [toasts, setToasts] = useState([]);
+
+  const toast = useCallback((message, type = 'info') => {
+    const id = Math.random();
+    setToasts((t) => [...t, { id, message, type }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4500);
+  }, []);
+
+  const loadMeta = useCallback(() => api.get('/meta').then(setMeta).catch(() => {}), []);
+
+  useEffect(() => {
+    api.get('/auth/me').then(setUser).catch(() => setUser(null));
+  }, []);
+  useEffect(() => {
+    if (user) loadMeta();
+  }, [user, loadMeta]);
+
+  // เรียก API พร้อมแจ้งผล: คืนค่า undefined เมื่อผิดพลาด
+  const run = useCallback(
+    async (fn, okMessage) => {
+      try {
+        const out = await fn();
+        if (okMessage) toast(okMessage);
+        return out ?? true;
+      } catch (e) {
+        if (e.status === 401) setUser(null);
+        toast(e.message, 'error');
+        return undefined;
+      }
+    },
+    [toast],
+  );
+
+  return (
+    <AppCtx.Provider value={{ user, setUser, meta, loadMeta, toast, run }}>
+      {children}
+      <div className="toasts" aria-live="polite">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.type}`}>{t.message}</div>
+        ))}
+      </div>
+    </AppCtx.Provider>
+  );
+}
+
+// โหลดข้อมูลจาก API พร้อมฟังก์ชัน reload
+export function useData(path, deps = []) {
+  const { run } = useApp();
+  const [data, setData] = useState(null);
+  const reload = useCallback(async () => {
+    const out = await run(() => api.get(path));
+    if (out !== undefined) setData(out);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, run, ...deps]);
+  useEffect(() => {
+    reload();
+  }, [reload]);
+  return [data, reload, setData];
+}
