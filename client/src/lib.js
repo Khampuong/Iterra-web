@@ -77,6 +77,8 @@ export const WIDE = ['admin', 'shareholder', 'director']; // ดูได้ท�
 export const SELL = ['admin', 'sales', 'staff']; // ขายงานได้
 export const PROJECTS = ['admin', 'shareholder', 'director', 'staff']; // ดูโครงการได้ (ฝ่ายขายดูไม่ได้)
 export const ALL_ROLES = Object.keys(ROLE_LABEL);
+// ทีมพัฒนา (dev) = สมาชิกสิทธิ์พนักงานทุกตำแหน่ง และ admin แก้ไขหน้า Demo ได้ (ต้องตรงกับ server/auth.js)
+export const canEditDemo = (user) => user.role === 'admin' || user.role === 'staff';
 export const homeFor = (role) => (role === 'sales' ? '/deals' : '/');
 
 // จำนวนเงินเป็นตัวอักษรไทย เช่น "หนึ่งร้อยบาทถ้วน"

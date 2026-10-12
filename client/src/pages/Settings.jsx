@@ -13,17 +13,18 @@ export default function Settings() {
     const out = await run(() => api.put(`/settings/${key}`, value), 'บันทึกการตั้งค่าแล้ว');
     if (out) {
       setSettings(out);
-      if (key === 'sales_steps') loadMeta();
+      if (key === 'sales_steps' || key === 'requirement_items') loadMeta();
     }
   };
 
   return (
     <>
       <PageHead eyebrow="ผู้ดูแลระบบ" title="ตั้งค่า" sub="อัตราค่าแรง ราคา งวดชำระ การแบ่งผลประโยชน์ และข้อมูลบริษัท" />
-      <Tabs value={tab} onChange={setTab} tabs={[['pricing', 'ราคาและค่าแรง'], ['terms', 'งวดชำระและผลประโยชน์'], ['steps', 'ขั้นตอนงานขาย'], ['company', 'ข้อมูลบริษัท']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['pricing', 'ราคาและค่าแรง'], ['terms', 'งวดชำระและผลประโยชน์'], ['steps', 'ขั้นตอนงานขาย'], ['checklist', 'เช็คลิสต์ Requirement'], ['company', 'ข้อมูลบริษัท']]} />
       {tab === 'pricing' && <Pricing settings={settings} save={save} />}
       {tab === 'terms' && <Terms settings={settings} save={save} />}
       {tab === 'steps' && <SalesSteps settings={settings} save={save} />}
+      {tab === 'checklist' && <ChecklistItems settings={settings} save={save} />}
       {tab === 'company' && <Company settings={settings} save={save} />}
     </>
   );
@@ -102,6 +103,63 @@ function Terms({ settings, save }) {
       <NumberForm title="การแบ่งผลประโยชน์" value={settings.sharing} onSave={(v) => save('sharing', v)}
         hint="คอมมิชชันฝ่ายขายคิดจากมูลค่างานก่อน VAT · ส่วนของบริษัทคิดจากยอดหลังหักต้นทุนตรงและคอมมิชชัน ที่เหลือเป็นของทีมแบ่งตามตำแหน่ง"
         fields={[['sales_percent', 'คอมมิชชันฝ่ายขาย (%)'], ['company_percent', 'ส่วนของบริษัท (%)']]} />
+    </div>
+  );
+}
+
+// เช็คลิสต์ Requirement: รายการมาตรฐานของระบบ + รายการที่ admin เพิ่มเอง
+function ChecklistItems({ settings, save }) {
+  const { meta } = useApp();
+  const [items, setItems] = useState(settings.requirement_items);
+  useEffect(() => setItems(settings.requirement_items), [settings.requirement_items]);
+  const set = (i, patch) => setItems(items.map((m, n) => (n === i ? { ...m, ...patch } : m)));
+  const dirty = JSON.stringify(items) !== JSON.stringify(settings.requirement_items);
+  const builtin = meta.requirement_options.filter((o) => !o.custom);
+
+  return (
+    <div className="stack">
+      <div className="card stack">
+        <div>
+          <h2>รายการที่เพิ่มเอง</h2>
+          <p className="small muted">รายการที่เพิ่มจะไปแสดงในเช็คลิสต์ของหน้างานขายทันที · กำลังคน (man-day) ใช้คำนวณราคาเมื่อพนักงานขายติ๊กรายการนี้</p>
+        </div>
+        {items.length === 0 && <p className="muted">ยังไม่มีรายการที่เพิ่มเอง</p>}
+        {items.map((m, i) => (
+          <div key={i} className="stack" style={{ borderTop: '1px solid var(--line-2)', paddingTop: 16, gap: 10 }}>
+            <div className="row" style={{ flexWrap: 'nowrap' }}>
+              <input value={m.title} maxLength={80} onChange={(e) => set(i, { title: e.target.value })} placeholder="ชื่อรายการ เช่น ระบบสะสมแต้ม" aria-label="ชื่อรายการ" />
+              <button className="btn ghost danger sm" onClick={() => setItems(items.filter((_, n) => n !== i))} aria-label="ลบรายการ"><Icon name="trash" /></button>
+            </div>
+            <input value={m.desc} maxLength={200} onChange={(e) => set(i, { desc: e.target.value })} placeholder="คำอธิบายสั้น ๆ ที่จะแสดงใต้ชื่อและในใบเสนอราคา" aria-label="คำอธิบาย" />
+            <div className="row">
+              <span className="small muted">กำลังคน (man-day):</span>
+              {Object.entries(m.effort).map(([code, d]) => (
+                <label key={code} className="row" style={{ gap: 4 }}>
+                  <span className="small">{code}</span>
+                  <input className="inline-input" type="number" min="0" step="0.5" style={{ width: 70 }} value={d} onChange={(e) => set(i, { effort: { ...m.effort, [code]: e.target.value } })} />
+                </label>
+              ))}
+              <select className="inline-input" style={{ width: 'auto' }} value="" aria-label="เพิ่มตำแหน่ง" onChange={(e) => e.target.value && set(i, { effort: { ...m.effort, [e.target.value]: 1 } })}>
+                <option value="">+ ตำแหน่ง</option>
+                {meta.positions.filter((p) => !(p.code in m.effort)).map((p) => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}
+              </select>
+              <span className="small muted">ใส่ 0 เพื่อเอาตำแหน่งออก</span>
+            </div>
+          </div>
+        ))}
+        <div className="row">
+          <button className="btn sm" onClick={() => setItems([...items, { id: '', title: '', desc: '', effort: { FE: 2, BE: 3, QA: 1 } }])}><Icon name="plus" />เพิ่มรายการ</button>
+          <div style={{ flex: 1 }} />
+          {dirty && <button className="btn" onClick={() => setItems(settings.requirement_items)}>ยกเลิก</button>}
+          <button className="btn primary" disabled={!dirty} onClick={() => save('requirement_items', items)}>บันทึกเช็คลิสต์</button>
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-head"><h2>รายการมาตรฐานของระบบ ({builtin.length})</h2><span className="small muted">แก้ไขไม่ได้</span></div>
+        <div className="checklist">
+          {builtin.map((o) => <div key={o.id} className="check" style={{ cursor: 'default' }}><span><b>{o.title}</b><small>{o.desc}</small></span></div>)}
+        </div>
+      </div>
     </div>
   );
 }

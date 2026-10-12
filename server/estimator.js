@@ -1,5 +1,5 @@
 // คำนวณราคา ระยะเวลา และความเป็นไปได้ + ตัววิเคราะห์สำรองเมื่อไม่ได้ต่อ Claude API
-import { q, today, businessDaysBetween } from './db.js';
+import { q, today, businessDaysBetween, getSettings } from './db.js';
 import { POSITION_CODES, positionByCode } from './positions.js';
 
 const round100 = (n) => Math.round(n / 100) * 100;
@@ -120,12 +120,18 @@ const CATALOG = [
 // รหัสของแต่ละรายการในเช็คลิสต์ Requirement (เรียงตาม CATALOG)
 const CATALOG_IDS = ['member', 'dashboard', 'payment', 'shop', 'booking', 'erp', 'docs', 'notify', 'chat', 'mobile', 'api', 'training', 'cms', 'admin', 'hosting', 'domain', 'service'];
 CATALOG.forEach((m, i) => { m.id = CATALOG_IDS[i]; });
-export const REQUIREMENT_OPTIONS = CATALOG.map((m) => ({ id: m.id, title: m.title, desc: m.desc }));
+const BUILTIN_OPTIONS = CATALOG.map((m) => ({ id: m.id, title: m.title, desc: m.desc }));
+
+// เช็คลิสต์ทั้งหมด = รายการมาตรฐานของระบบ + รายการที่ admin เพิ่มเองในหน้าตั้งค่า
+export function requirementOptions(settings = getSettings()) {
+  return [...BUILTIN_OPTIONS, ...settings.requirement_items.map((m) => ({ ...m, custom: true }))];
+}
 
 export function parseChecks(deal) {
   try {
     const v = JSON.parse(deal.requirement_checks || '[]');
-    return Array.isArray(v) ? v.filter((id) => CATALOG_IDS.includes(id)) : [];
+    const known = requirementOptions().map((o) => o.id);
+    return Array.isArray(v) ? v.filter((id) => known.includes(id)) : [];
   } catch {
     return [];
   }
@@ -143,6 +149,10 @@ export function fallbackAnalyze(deal) {
   let modules = CATALOG.filter((m) => checks.includes(m.id) || m.k.test(text)).map(({ title, desc, effort }) => ({
     title, description: desc, effort: { ...effort },
   }));
+  // รายการที่ admin เพิ่มเอง: ใช้เมื่อถูกติ๊กเท่านั้น (ไม่มีการจับคำสำคัญ)
+  for (const m of getSettings().requirement_items) {
+    if (checks.includes(m.id)) modules.push({ title: m.title, description: m.desc, effort: { ...m.effort } });
+  }
 
   if (modules.length === 0) {
     // ไม่พบคำสำคัญ: ใช้แต่ละบรรทัดของ requirement เป็นรายการงาน

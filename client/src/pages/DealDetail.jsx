@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, date, DEAL_STATUS, DOC_TYPE, money, money2, num, phoneDigits, PROJECTS, SELL, todayStr } from '../lib.js';
 import { Badge, Bar, Field, Icon, Modal, RequirementChecklist, Tabs, useApp, useData } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
+import DealChat from '../components/DealChat.jsx';
 
 const FEAS_COLOR = { go: 'var(--ok)', conditional: '#d39a1c', 'no-go': 'var(--danger)' };
 const tone = (score) => (score >= 75 ? 'ok' : score >= 50 ? 'warn' : 'danger');
@@ -43,7 +44,7 @@ export default function DealDetail() {
 
   return (
     <>
-      <PageHead eyebrow={<Link to="/deals">← งานขาย</Link>} title={deal.title} sub={`${deal.code} · ${deal.customer_company || deal.customer_name} · ผู้ขาย ${deal.sales_name ?? '—'}`}>
+      <PageHead eyebrow={<Link to="/deals">← งานขาย</Link>} title={deal.title} sub={`${deal.code} · ${deal.customer_company || deal.customer_name} · ผู้ขาย ${deal.sales_name ?? '—'} · dev ${deal.dev_name ?? 'ยังไม่ได้เลือก'}`}>
         <Badge tone={DEAL_STATUS[deal.status].tone}>{DEAL_STATUS[deal.status].label}</Badge>
         {canSell && !closed && (
           <>
@@ -81,7 +82,7 @@ export default function DealDetail() {
       <Tabs
         value={tab}
         onChange={setTab}
-        tabs={[['requirement', 'Requirement'], ['estimate', 'ประเมินราคาและความเป็นไปได้'], ['demo', 'Demo หน้าเว็บ'], ['docs', 'เอกสารและปิดงาน']]}
+        tabs={[['requirement', 'Requirement'], ['estimate', 'ประเมินราคาและความเป็นไปได้'], ['demo', 'Demo หน้าเว็บ'], ['team', 'คุยงานกับ dev'], ['docs', 'เอกสารและปิดงาน']]}
       />
 
       {tab === 'requirement' && (
@@ -94,8 +95,13 @@ export default function DealDetail() {
       )}
       {tab === 'demo' && (
         <DemoTab deal={deal} canSell={canSell} isAdmin={isAdmin} busy={busy}
-          onSaveLink={(url) => act('link', () => api.put(`/deals/${id}/demo-link`, { url }), url ? 'บันทึกลิงก์ Demo แล้ว' : 'ลบลิงก์ Demo แล้ว')} onGenerate={() => act('demo', () => api.post(`/deals/${id}/demo`), 'สร้าง Demo แล้ว')} />
+          onSaveLink={(url) => act('link', () => api.put(`/deals/${id}/demo-link`, { url }), url ? 'บันทึกลิงก์ Demo แล้ว' : 'ลบลิงก์ Demo แล้ว')} onGenerate={() => {
+            // หน้าที่ทีมพัฒนาแก้ไว้จะถูกแทนที่ จึงถามก่อน
+            if (['dev', 'html'].includes(deal.demo_source) && !window.confirm('หน้า Demo นี้ทีมพัฒนาแก้ไขไว้ การสร้างใหม่จะแทนที่หน้าปัจจุบัน ต้องการทำต่อหรือไม่')) return;
+            act('demo', () => api.post(`/deals/${id}/demo`), 'สร้าง Demo แล้ว');
+          }} />
       )}
+      {tab === 'team' && <TeamTab deal={deal} reload={reload} />}
       {tab === 'docs' && <DocsTab deal={deal} isAdmin={isAdmin} canSell={canSell} busy={busy} act={act} reload={reload} close={close} setClose={setClose} />}
     </>
   );
@@ -313,6 +319,70 @@ function EstimateTab({ deal, isAdmin, canSell, busy, onSave, onAnalyze }) {
   );
 }
 
+// ผู้ถือหุ้นเลือก dev รับงาน และห้องคุยงานระหว่างพนักงานขายกับ dev
+function TeamTab({ deal, reload }) {
+  const { user, run } = useApp();
+  const canAssign = ['admin', 'shareholder'].includes(user.role);
+  return (
+    <div className="grid g-main">
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <h2>คุยงาน</h2>
+            <p className="small muted">พนักงานขาย {deal.sales_name ?? '—'} · dev {deal.dev_name ?? 'ยังไม่ได้เลือก'}</p>
+          </div>
+        </div>
+        <DealChat dealId={deal.id} hint={deal.dev_name ? undefined : 'ยังไม่มี dev รับงานนี้ — ผู้ถือหุ้นจะเป็นผู้เลือก dev'} />
+      </div>
+      <div className="card stack">
+        <h2>dev ที่รับงาน</h2>
+        {deal.dev_name
+          ? <div className="notice info"><b>{deal.dev_name}</b> รับงานนี้ — เตรียมหน้า Demo และแนบลิงก์ให้ที่แท็บ “Demo หน้าเว็บ”</div>
+          : <div className="notice">
+              {deal.items.length === 0 && !canAssign
+                ? 'ยังไม่ได้ส่งงานให้ dev — กด “วิเคราะห์ Requirement” ก่อน ระบบจะแจ้งผู้ถือหุ้นให้เลือก dev รับงาน'
+                : `ยังไม่ได้ส่งงานให้ dev — dev จะเริ่มงานได้เมื่อผู้ถือหุ้นกดเลือก${canAssign ? 'จากรายชื่อด้านล่าง' : ' (แจ้งผู้ถือหุ้นแล้ว)'}`}
+            </div>}
+        {canAssign && <AssignDev deal={deal} onDone={reload} run={run} />}
+      </div>
+    </div>
+  );
+}
+
+function AssignDev({ deal, onDone, run }) {
+  const [devs, reloadDevs] = useData('/deals/dev-candidates');
+  const pick = async (devId) => {
+    if (await run(() => api.put(`/deals/${deal.id}/dev`, { dev_id: devId }), devId ? 'เลือก dev แล้ว — แจ้งเตือน dev และพนักงานขายเรียบร้อย' : 'ยกเลิก dev ของงานนี้แล้ว')) {
+      reloadDevs();
+      onDone();
+    }
+  };
+  if (!devs) return null;
+  if (devs.length === 0) return <p className="muted">ยังไม่มีสมาชิกสิทธิ์พนักงาน — เพิ่มได้ที่เมนูสมาชิก</p>;
+  return (
+    <>
+      <ul className="list">
+        {devs.map((d) => {
+          const current = d.name === deal.dev_name;
+          return (
+            <li key={d.id} className="row" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
+              <div>
+                {d.name} <span className="small muted">· {d.position ?? 'ไม่ระบุตำแหน่ง'}</span>
+                <div className="small muted">งานขายที่ถืออยู่ {d.open_deals} · งานโครงการค้าง {d.open_tasks}</div>
+              </div>
+              <div className="row" style={{ flexWrap: 'nowrap' }}>
+                <Badge tone={d.free ? 'ok' : 'warn'}>{d.free ? 'ว่าง' : 'มีงาน'}</Badge>
+                {current ? <Badge tone="blue">รับงานนี้</Badge> : <button className="btn sm" onClick={() => pick(d.id)}>เลือก</button>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {deal.dev_name && <div><button className="btn ghost sm danger" onClick={() => pick(null)}>ยกเลิก dev ของงานนี้</button></div>}
+    </>
+  );
+}
+
 function DemoTab({ deal, canSell, isAdmin, busy, onGenerate, onSaveLink }) {
   const { toast } = useApp();
   const [full, setFull] = useState(false);
@@ -326,7 +396,7 @@ function DemoTab({ deal, canSell, isAdmin, busy, onGenerate, onSaveLink }) {
       <div className="card-head">
         <div>
           <h2>ลิงก์ Demo สำหรับนำเสนอลูกค้า</h2>
-          <p className="small muted">ผู้ดูแลระบบแนบลิงก์ Demo ที่เตรียมไว้ พนักงานขายเปิดหรือคัดลอกไปส่งให้ลูกค้าได้</p>
+          <p className="small muted">dev ที่รับงานหรือผู้ดูแลระบบแนบลิงก์หน้าเว็บ Demo ให้พนักงานขายดูก่อนนำไปเสนอลูกค้า</p>
         </div>
       </div>
       {deal.demo_url ? (
@@ -335,7 +405,7 @@ function DemoTab({ deal, canSell, isAdmin, busy, onGenerate, onSaveLink }) {
           <a className="btn primary" href={deal.demo_url} target="_blank" rel="noopener noreferrer">เปิดลิงก์</a>
           <button className="btn" onClick={copy}>คัดลอกลิงก์</button>
         </div>
-      ) : <p className="muted">{isAdmin ? 'ยังไม่ได้แนบลิงก์ — วางลิงก์ด้านล่างแล้วกดบันทึก' : 'ผู้ดูแลระบบยังไม่ได้แนบลิงก์ Demo สำหรับงานนี้'}</p>}
+      ) : <p className="muted">{isAdmin ? 'ยังไม่ได้แนบลิงก์ — วางลิงก์ด้านล่างแล้วกดบันทึก' : 'ยังไม่มีลิงก์ Demo — dev ที่รับงานจะแนบให้เมื่อพร้อม'}</p>}
       {isAdmin && (
         <div className="row" style={{ flexWrap: 'nowrap', marginTop: 14 }}>
           <input type="url" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://demo.example.com" aria-label="ลิงก์ Demo" />
@@ -348,7 +418,7 @@ function DemoTab({ deal, canSell, isAdmin, busy, onGenerate, onSaveLink }) {
       <div className="card-head">
         <div>
           <h2>Demo หน้าเว็บเบื้องต้นตาม Requirement</h2>
-          <p className="small muted">ใช้ประกอบการนำเสนอลูกค้า — เป็นหน้าเว็บตัวอย่าง ยังไม่เชื่อมข้อมูลจริง{deal.demo_source === 'fallback' && ' · แม่แบบพื้นฐาน (ยังไม่ได้ใช้ Claude)'}</p>
+          <p className="small muted">ใช้ประกอบการนำเสนอลูกค้า — เป็นหน้าเว็บตัวอย่าง ยังไม่เชื่อมข้อมูลจริง{deal.demo_source === 'fallback' && ' · แม่แบบพื้นฐาน (ยังไม่ได้ใช้ Claude)'}{['dev', 'html'].includes(deal.demo_source) && ' · ทีมพัฒนาเพิ่มข้อมูลแล้ว'}</p>
         </div>
         <div className="row">
           {deal.demo_html && <button className="btn" onClick={() => setFull(true)}><Icon name="expand" />เต็มจอ</button>}

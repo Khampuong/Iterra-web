@@ -68,6 +68,8 @@ export function requireAuth(req, res, next) {
 export const WIDE_ROLES = ['admin', 'shareholder', 'director'];
 export const SELL_ROLES = ['admin', 'sales', 'staff'];
 export const PROJECT_ROLES = ['admin', 'shareholder', 'director', 'staff']; // ฝ่ายขายดูโครงการไม่ได้
+// ทีมพัฒนา (dev) = สมาชิกสิทธิ์พนักงานทุกตำแหน่ง — แก้ไขข้อมูลหน้า Demo ได้ เช่นเดียวกับ admin
+export const canEditDemo = (user) => user.role === 'admin' || user.role === 'staff';
 export const seesAll = (user) => WIDE_ROLES.includes(user.role);
 
 export const requireRole = (...roles) => (req, res, next) => {

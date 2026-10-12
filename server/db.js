@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { POSITIONS } from './positions.js';
+import { sendNotificationEmail } from './mailer.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_DIR = process.env.DATA_DIR || path.join(here, '..', 'data');
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS deals (
   analysis TEXT,                             -- JSON ผลวิเคราะห์
   demo_html TEXT, demo_source TEXT,
   demo_url TEXT,                             -- ลิงก์ Demo ที่ admin แนบให้พนักงานขายนำเสนอ
+  demo_data TEXT,                            -- JSON ข้อมูลหน้า Demo ที่ทีมพัฒนาแก้ไข
   step TEXT,                                 -- ขั้นตอนงานขายปัจจุบัน (รหัสจาก settings.sales_steps)
   duration_days INTEGER NOT NULL DEFAULT 0,  -- วันทำการ
   discount REAL NOT NULL DEFAULT 0,
@@ -115,6 +117,13 @@ CREATE TABLE IF NOT EXISTS transactions (
   document_id INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS deal_messages (
+  id INTEGER PRIMARY KEY,
+  deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY,
   user_id INTEGER,                           -- NULL = ทุกคน
@@ -134,6 +143,16 @@ if (!db.prepare('PRAGMA table_info(projects)').all().some((c) => c.name === 'sal
 // ฐานข้อมูลที่สร้างก่อนมีขั้นตอนงานขายแบบแก้ไขได้: เพิ่มคอลัมน์ให้
 if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'step')) {
   db.exec('ALTER TABLE deals ADD COLUMN step TEXT');
+}
+
+// dev ที่ผู้ถือหุ้นเลือกให้รับงานขายนี้
+if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'dev_id')) {
+  db.exec('ALTER TABLE deals ADD COLUMN dev_id INTEGER REFERENCES users(id)');
+}
+
+// ฐานข้อมูลที่สร้างก่อนมีข้อมูลหน้า Demo ของทีมพัฒนา: เพิ่มคอลัมน์ให้
+if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'demo_data')) {
+  db.exec('ALTER TABLE deals ADD COLUMN demo_data TEXT');
 }
 
 // ฐานข้อมูลที่สร้างก่อนมีลิงก์ Demo: เพิ่มคอลัมน์ให้
@@ -203,6 +222,9 @@ export const DEFAULT_SETTINGS = {
 
 export const SYSTEM_STEPS = ['draft', 'analyzed', 'quoted', 'won'];
 
+// รายการเช็คลิสต์ Requirement ที่ admin เพิ่มเอง: [{ id: 'x_...', title, desc, effort: { ตำแหน่ง: man-day } }]
+DEFAULT_SETTINGS.requirement_items = [];
+
 export function getSettings() {
   const out = structuredClone(DEFAULT_SETTINGS);
   for (const row of q.all('SELECT key, value FROM settings')) {
@@ -228,8 +250,11 @@ export function sessionSecret() {
   return fs.readFileSync(file, 'utf8').trim();
 }
 
+// แจ้งเตือนในระบบ และส่งอีเมลถึงผู้รับด้วย (ถ้าตั้งค่า SMTP ไว้)
 export function notify({ user_id = null, title, body = '', link = '' }) {
   q.run('INSERT INTO notifications (user_id, title, body, link) VALUES (?, ?, ?, ?)', user_id, title, body, link);
+  const user = user_id ? q.get('SELECT name, email FROM users WHERE id = ? AND active = 1', user_id) : null;
+  if (user) sendNotificationEmail({ to: user.email, name: user.name, title, body, link });
 }
 
 // เลขรันเอกสาร/รหัส เช่น QT-2026-0001

@@ -2,8 +2,9 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { q, tx, getSettings, nextCode, today, addDays, addBusinessDays, notify, SYSTEM_STEPS } from '../db.js';
 import { hashPassword, PROJECT_ROLES, requireRole, seesAll, SELL_ROLES, WIDE_ROLES } from '../auth.js';
-import { priceItem, dealTotals, feasibility, suggestDuration, cleanEffort, fallbackAnalyze, parseChecks, REQUIREMENT_OPTIONS } from '../estimator.js';
+import { priceItem, dealTotals, feasibility, suggestDuration, cleanEffort, fallbackAnalyze, parseChecks, requirementOptions } from '../estimator.js';
 import { fallbackDemo } from '../demo-template.js';
+import { cleanHttpUrl } from '../url.js';
 import { analyzeRequirement, generateDemo, AiUnavailable } from '../ai.js';
 import { createProjectFromDeal } from './projects.js';
 
@@ -30,7 +31,7 @@ function normalizePhone(b) {
 // เช็คลิสต์ Requirement: เก็บเป็น JSON เฉพาะรหัสที่มีในระบบ
 function normalizeChecks(b) {
   if (!('requirement_checks' in b)) return;
-  const known = REQUIREMENT_OPTIONS.map((o) => o.id);
+  const known = requirementOptions().map((o) => o.id);
   const list = Array.isArray(b.requirement_checks) ? b.requirement_checks.filter((id) => known.includes(id)) : [];
   b.requirement_checks = JSON.stringify([...new Set(list)]);
 }
@@ -100,6 +101,7 @@ export function loadDeal(deal, { withDemo = true } = {}) {
     analysis: analysis ? JSON.parse(analysis) : null,
     requirement_checks: parseChecks(deal),
     step: currentStep(deal, settings.sales_steps),
+    dev_name: deal.dev_id ? q.get('SELECT name FROM users WHERE id = ?', deal.dev_id)?.name ?? null : null,
     has_demo: Boolean(demo_html),
     ...(withDemo ? { demo_html } : {}),
     items,
@@ -273,6 +275,13 @@ router.post('/:id/analyze', sales, async (req, res, next) => {
         JSON.stringify({ ...analysis, analyzed_at: new Date().toISOString() }), duration, deal.id,
       );
     });
+    // พนักงานขายรับงานและกดวิเคราะห์แล้ว: แจ้งผู้ถือหุ้นให้กดเลือก dev รับงาน (แจ้งจนกว่าจะมี dev)
+    if (!deal.dev_id) {
+      const seller = q.get('SELECT name FROM users WHERE id = ?', deal.sales_id)?.name ?? req.user.name;
+      for (const sh of q.all("SELECT id FROM users WHERE role = 'shareholder' AND active = 1")) {
+        notify({ user_id: sh.id, title: `งานขาย ${deal.code} วิเคราะห์แล้ว รอเลือก dev`, body: `${deal.title} — พนักงานขาย ${seller}`, link: `/deals/${deal.id}` });
+      }
+    }
     res.json({ ...loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)), notice });
   } catch (e) {
     next(e);
@@ -340,17 +349,8 @@ router.put('/:id/step', sales, (req, res) => {
 router.put('/:id/demo-link', admin, (req, res) => {
   const deal = findDeal(req, res);
   if (!deal) return;
-  const raw = String(req.body?.url || '').trim();
-  let url = null;
-  if (raw) {
-    try {
-      const u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`);
-      if (!['http:', 'https:'].includes(u.protocol) || !u.hostname.includes('.')) throw new Error('bad url');
-      url = u.href;
-    } catch {
-      return res.status(400).json({ error: 'ลิงก์ไม่ถูกต้อง ต้องขึ้นต้นด้วย http:// หรือ https://' });
-    }
-  }
+  const { url, error } = cleanHttpUrl(req.body?.url);
+  if (error) return res.status(400).json({ error });
   q.run('UPDATE deals SET demo_url = ? WHERE id = ?', url, deal.id);
   if (url && url !== deal.demo_url && deal.sales_id && deal.sales_id !== req.user.id) {
     notify({ user_id: deal.sales_id, title: `มีลิงก์ Demo สำหรับ ${deal.code}`, body: `${deal.title} — พร้อมนำเสนอลูกค้า`, link: `/deals/${deal.id}` });

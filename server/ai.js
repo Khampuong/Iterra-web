@@ -4,12 +4,13 @@ import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import { POSITIONS, POSITION_CODES } from './positions.js';
-import { parseChecks, REQUIREMENT_OPTIONS } from './estimator.js';
+import { parseChecks, requirementOptions } from './estimator.js';
+import { demoDataOf } from './demo-template.js';
 
 // รายการที่ลูกค้าติ๊กในเช็คลิสต์ เป็นข้อความสำหรับใส่ใน prompt
 function checklistText(deal) {
   const checks = parseChecks(deal);
-  const picked = REQUIREMENT_OPTIONS.filter((o) => checks.includes(o.id));
+  const picked = requirementOptions().filter((o) => checks.includes(o.id));
   return picked.length ? picked.map((o) => `- ${o.title}: ${o.desc}`).join('\n') : '(ไม่ได้เลือก)';
 }
 
@@ -145,6 +146,7 @@ ${checklistText(deal)}
 ข้อมูลเพิ่มเติมจากลูกค้า:
 ${deal.requirement || '(ไม่มี)'}
 
+${deal.demo_data ? `ข้อมูลที่ทีมพัฒนากำหนดให้แสดงบนหน้าเว็บ (ใช้เนื้อหานี้เป็นหลัก):\n${JSON.stringify(demoDataOf(deal, items), null, 1)}\n` : ''}
 รายการงานในใบเสนอราคา:
 ${items.map((i, n) => `${n + 1}. ${i.title} — ${i.description || ''}`).join('\n')}`,
         },
