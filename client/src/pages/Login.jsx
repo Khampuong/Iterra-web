@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../lib.js';
-import { Field, useApp } from '../components/ui.jsx';
+import { Icon, useApp } from '../components/ui.jsx';
 
 export default function Login() {
   const { setUser } = useApp();
@@ -23,26 +23,28 @@ export default function Login() {
 
   return (
     <div className="login">
-      <div className="login-art">
-        <b>ITERRA</b>
-        <div>
-          <h1>จาก Requirement<br />ถึงวันส่งมอบ<br />ในระบบเดียว</h1>
-          <p>ขายงาน ประเมินราคา ออกเอกสาร แบ่งงานตามตำแหน่ง ติดตามความคืบหน้า และแบ่งผลประโยชน์อย่างโปร่งใส</p>
+      <form className="login-card" onSubmit={submit}>
+        <div className="login-badge">
+          <img src="/logo-mark.png" alt="ITERRA" width="480" height="296" />
         </div>
-        <span className="small" style={{ opacity: 0.6 }}>People · Ideas · Systems</span>
-      </div>
-      <div className="login-form">
-        <form onSubmit={submit}>
-          <div>
-            <h1>เข้าสู่ระบบ</h1>
-            <p className="muted" style={{ marginTop: 6 }}>ระบบรับงานครบวงจรของบริษัท</p>
-          </div>
-          <Field label="อีเมล"><input type="email" autoComplete="username" required value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
-          <Field label="รหัสผ่าน"><input type="password" autoComplete="current-password" required value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
-          {error && <div className="notice" role="alert">{error}</div>}
-          <button className="btn primary" disabled={busy}>{busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}</button>
-        </form>
-      </div>
+        <h1>เข้าสู่ระบบ</h1>
+        <p className="login-sub">บริษัท อิเทอร์ร่า จำกัด · ITERRA CO., LTD.</p>
+
+        <label className="login-field">
+          <Icon name="user" />
+          <input type="email" autoComplete="username" required placeholder="อีเมล" aria-label="อีเมล"
+            value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+        </label>
+        <label className="login-field">
+          <Icon name="lock" />
+          <input type="password" autoComplete="current-password" required placeholder="รหัสผ่าน" aria-label="รหัสผ่าน"
+            value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
+        </label>
+
+        {error && <div className="notice" role="alert">{error}</div>}
+        <button className="login-btn" disabled={busy}>{busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}</button>
+        <p className="login-help">ลืมรหัสผ่าน? ติดต่อผู้ดูแลระบบเพื่อตั้งรหัสใหม่</p>
+      </form>
     </div>
   );
 }

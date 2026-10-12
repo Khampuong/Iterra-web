@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { POSITIONS } from './positions.js';
-import { sendNotificationEmail } from './mailer.js';
+import { sendNotificationEmail, EMAIL_DEFAULTS } from './mailer.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_DIR = process.env.DATA_DIR || path.join(here, '..', 'data');
@@ -165,6 +165,11 @@ if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'requir
   db.exec("ALTER TABLE deals ADD COLUMN requirement_checks TEXT NOT NULL DEFAULT '[]'");
 }
 
+// ภาพสมาชิก: เก็บเป็น data URL ขนาดเล็ก (ย่อจากหน้าเว็บก่อนส่ง)
+if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'avatar')) {
+  db.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
+}
+
 // ฐานข้อมูลที่สร้างก่อนมีเบอร์โทรศัพท์สมาชิก: เพิ่มคอลัมน์ให้
 if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'phone')) {
   db.exec('ALTER TABLE users ADD COLUMN phone TEXT');
@@ -195,7 +200,7 @@ export function tx(fn) {
 export const DEFAULT_SETTINGS = {
   company: {
     name: 'Iterra Co., Ltd.',
-    name_th: 'บริษัท ไอเทอร์ร่า จำกัด',
+    name_th: 'บริษัท อิเทอร์ร่า จำกัด',
     address: '',
     tax_id: '',
     phone: '',
@@ -224,6 +229,9 @@ export const SYSTEM_STEPS = ['draft', 'analyzed', 'quoted', 'won'];
 
 // รายการเช็คลิสต์ Requirement ที่ admin เพิ่มเอง: [{ id: 'x_...', title, desc, effort: { ตำแหน่ง: man-day } }]
 DEFAULT_SETTINGS.requirement_items = [];
+
+// การเชื่อมต่ออีเมลแจ้งเตือน (SMTP) — แก้ได้ที่หน้าตั้งค่า ค่าเริ่มต้นมาจาก .env
+DEFAULT_SETTINGS.email = { ...EMAIL_DEFAULTS };
 
 export function getSettings() {
   const out = structuredClone(DEFAULT_SETTINGS);

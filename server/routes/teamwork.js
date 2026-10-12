@@ -8,7 +8,7 @@ const assigner = requireRole('admin', 'shareholder'); // ผู้เลือ�
 
 // dev (สิทธิ์พนักงาน) พร้อมภาระงานปัจจุบัน เรียงคนว่างขึ้นก่อน
 router.get('/dev-candidates', assigner, (_req, res) => {
-  const devs = q.all("SELECT id, name, position, phone FROM users WHERE role = 'staff' AND active = 1 ORDER BY name").map((u) => {
+  const devs = q.all("SELECT id, name, position, phone, avatar FROM users WHERE role = 'staff' AND active = 1 ORDER BY name").map((u) => {
     const deals = q.get("SELECT COUNT(*) AS n FROM deals WHERE dev_id = ? AND status NOT IN ('won', 'lost')", u.id).n;
     const tasks = q.get(
       "SELECT COUNT(*) AS n FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.assignee_id = ? AND t.status != 'done' AND p.status = 'active'",

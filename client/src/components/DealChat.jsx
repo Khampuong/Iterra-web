@@ -46,7 +46,7 @@ export default function DealChat({ dealId, hint }) {
         ))}
       </div>
       <form className="row" style={{ flexWrap: 'nowrap', alignItems: 'flex-end' }} onSubmit={send}>
-        <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="พิมพ์ข้อความ… (Enter เพื่อส่ง, Shift+Enter ขึ้นบรรทัดใหม่)" aria-label="ข้อความ"
+        <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="พิมพ์ข้อความ…" title="Enter เพื่อส่ง · Shift+Enter ขึ้นบรรทัดใหม่" aria-label="ข้อความ"
           style={{ minHeight: 44, height: 44 }} maxLength={2000}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) send(e); }} />
         <button className="btn primary" disabled={!text.trim() || sending}>ส่ง</button>
