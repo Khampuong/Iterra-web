@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
-import { ALL_ROLES, api, date, PROJECTS, ROLE_LABEL, WIDE } from '../lib.js';
+import { ALL_ROLES, api, canEditDemo, date, PROJECTS, ROLE_LABEL, WIDE } from '../lib.js';
 import { Field, Icon, Modal, useApp } from './ui.jsx';
 
 const NAV = [
@@ -9,12 +9,14 @@ const NAV = [
   { to: '/projects', label: 'โครงการ', icon: 'layers', roles: PROJECTS },
   { to: '/sharing', label: 'แบ่งผลประโยชน์', icon: 'pie', roles: WIDE },
   { to: '/finance', label: 'รายรับรายจ่าย', icon: 'wallet', roles: WIDE },
+  { to: '/demos', label: 'หน้า Demo', icon: 'spark', roles: ALL_ROLES, when: canEditDemo },
   { to: '/members', label: 'สมาชิก', icon: 'users', roles: ['admin'] },
   { to: '/settings', label: 'ตั้งค่า', icon: 'cog', roles: ['admin'] },
 ];
 
 function Notifications() {
   const [open, setOpen] = useState(false);
+  const { meta } = useApp();
   const [data, setData] = useState({ alerts: [], events: [], unread: 0 });
   const loc = useLocation();
   const ref = useRef(null);
@@ -52,7 +54,7 @@ function Notifications() {
               <div className="small muted">{a.body}</div>
             </Link>
           ))}
-          <h3>ความเคลื่อนไหว</h3>
+          <h3>ความเคลื่อนไหว <span className="small muted" style={{ fontWeight: 400 }}>· {meta?.email_enabled ? 'ส่งอีเมลแจ้งด้วย' : 'ยังไม่ได้เปิดแจ้งทางอีเมล'}</span></h3>
           {data.events.length === 0 && <div className="empty">ยังไม่มีการแจ้งเตือน</div>}
           {data.events.map((e) => (
             <Link key={e.id} to={e.link || '#'} className={`pop-item${e.read ? '' : ' unread'}`}>
@@ -94,7 +96,7 @@ export default function Layout() {
           <b>ITERRA</b>
           <span>PROJECT OPERATIONS</span>
         </div>
-        {NAV.filter((n) => n.roles.includes(user.role)).map((n) => (
+        {NAV.filter((n) => n.roles.includes(user.role) && (!n.when || n.when(user))).map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
             <Icon name={n.icon} />
             {n.label}

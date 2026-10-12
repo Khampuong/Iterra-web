@@ -8,6 +8,8 @@ import adminRoutes from './routes/admin.js';
 import dealRoutes, { documents } from './routes/deals.js';
 import projectRoutes from './routes/projects.js';
 import financeRoutes from './routes/finance.js';
+import demoRoutes from './routes/demos.js';
+import teamRoutes from './routes/teamwork.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, '..', 'dist');
@@ -36,9 +38,11 @@ app.use('/api', (req, res, next) => {
 });
 
 app.use('/api', adminRoutes);
+app.use('/api/deals', teamRoutes); // ต้องมาก่อน dealRoutes เพราะมีเส้นทาง /dev-candidates
 app.use('/api/deals', dealRoutes);
 app.use('/api/documents', documents);
 app.use('/api/projects', projectRoutes);
+app.use('/api/demos', demoRoutes);
 app.use('/api', financeRoutes);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'ไม่พบ API นี้' }));
 

@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { q, getSettings, setSetting, DEFAULT_SETTINGS, SYSTEM_STEPS } from '../db.js';
 import { requireAuth, requireRole, hashPassword, verifyPassword, setSession, clearSession, publicUser } from '../auth.js';
 import { GROUPS, PHASES, POSITIONS, POSITION_CODES, MEMBER_POSITIONS, MEMBER_POSITION_CODES } from '../positions.js';
-import { REQUIREMENT_OPTIONS } from '../estimator.js';
+import { requirementOptions, cleanEffort } from '../estimator.js';
+import { emailEnabled } from '../mailer.js';
 
 const router = Router();
 const admin = requireRole('admin');
@@ -49,7 +50,8 @@ router.put('/auth/password', requireAuth, (req, res) => {
 router.get('/meta', requireAuth, (_req, res) => {
   res.json({
     groups: GROUPS, phases: PHASES, positions: POSITIONS, member_positions: MEMBER_POSITIONS,
-    requirement_options: REQUIREMENT_OPTIONS,
+    requirement_options: requirementOptions(),
+    email_enabled: emailEnabled,
     sales_steps: getSettings().sales_steps,
     users: q.all('SELECT id, name, position, role FROM users WHERE active = 1 ORDER BY name'),
   });
@@ -63,7 +65,21 @@ router.put('/settings/:key', admin, (req, res) => {
   if (!(key in DEFAULT_SETTINGS)) return res.status(404).json({ error: 'ไม่พบการตั้งค่านี้' });
   let value = req.body;
 
-  if (key === 'sales_steps') {
+  if (key === 'requirement_items') {
+    if (!Array.isArray(value)) return res.status(400).json({ error: 'รูปแบบรายการไม่ถูกต้อง' });
+    if (value.length > 40) return res.status(400).json({ error: 'เพิ่มรายการเองได้ไม่เกิน 40 รายการ' });
+    const seen = new Set();
+    let n = 0;
+    value = value.map((m) => {
+      let id = /^x_[a-z0-9]{1,14}$/.test(String(m?.id || '')) ? m.id : '';
+      while (!id || seen.has(id)) id = `x_${Date.now().toString(36)}${n++}`;
+      seen.add(id);
+      return { id, title: String(m?.title || '').trim().slice(0, 80), desc: String(m?.desc || '').trim().slice(0, 200), effort: cleanEffort(m?.effort) };
+    });
+    if (value.some((m) => !m.title)) return res.status(400).json({ error: 'กรุณาตั้งชื่อให้ครบทุกรายการ' });
+    const noEffort = value.find((m) => !Object.keys(m.effort).length);
+    if (noEffort) return res.status(400).json({ error: `รายการ “${noEffort.title}” ต้องมีกำลังคนอย่างน้อย 1 ตำแหน่ง เพื่อใช้คำนวณราคา` });
+  } else if (key === 'sales_steps') {
     if (!Array.isArray(value)) return res.status(400).json({ error: 'รูปแบบขั้นตอนไม่ถูกต้อง' });
     if (value.length > 12) return res.status(400).json({ error: 'มีขั้นตอนได้ไม่เกิน 12 ขั้น' });
     const seen = new Set();

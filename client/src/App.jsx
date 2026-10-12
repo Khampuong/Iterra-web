@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout.jsx';
 import { useApp } from './components/ui.jsx';
-import { homeFor, PROJECTS, WIDE } from './lib.js';
+import { canEditDemo, homeFor, PROJECTS, WIDE } from './lib.js';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Deals from './pages/Deals.jsx';
@@ -11,6 +11,7 @@ import ProjectDetail from './pages/ProjectDetail.jsx';
 import Sharing from './pages/Sharing.jsx';
 import Finance from './pages/Finance.jsx';
 import Settings, { Members } from './pages/Settings.jsx';
+import DemoEditor, { Demos } from './pages/Demos.jsx';
 import PrintDoc from './pages/PrintDoc.jsx';
 
 export default function App() {
@@ -32,6 +33,8 @@ export default function App() {
         <Route path="projects/:id" element={only(PROJECTS, <ProjectDetail />)} />
         <Route path="sharing" element={only(WIDE, <Sharing />)} />
         <Route path="finance" element={only(WIDE, <Finance />)} />
+        <Route path="demos" element={canEditDemo(user) ? <Demos /> : <Navigate to={home} replace />} />
+        <Route path="demos/:id" element={canEditDemo(user) ? <DemoEditor /> : <Navigate to={home} replace />} />
         <Route path="members" element={only(['admin'], <Members />)} />
         <Route path="settings" element={only(['admin'], <Settings />)} />
         <Route path="*" element={<Navigate to={home} replace />} />

@@ -155,6 +155,13 @@ input[type='range'] { padding: 0; border: 0; accent-color: var(--accent); }
 .browser-bar .url { flex: 1; background: #fff; border: 1px solid var(--line); border-radius: 99px; padding: 3px 14px; font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser .demo-frame { border: 0; border-radius: 0; display: block; }
 
+.chat { display: flex; flex-direction: column; gap: 12px; }
+.chat-list { max-height: 420px; min-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; }
+.chat-msg { max-width: 78%; align-self: flex-start; }
+.chat-msg.mine { align-self: flex-end; text-align: right; }
+.chat-msg .bubble { display: inline-block; text-align: left; background: var(--line-2); border-radius: 12px; padding: 8px 12px; margin-top: 3px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-msg.mine .bubble { background: var(--accent); color: #fff; }
+
 /* ---------- table ---------- */
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
