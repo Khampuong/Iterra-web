@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, date, DEAL_STATUS, DOC_TYPE, money, money2, num, phoneDigits, PROJECTS, SELL, todayStr } from '../lib.js';
-import { Badge, Bar, Field, Icon, Modal, RequirementChecklist, Tabs, useApp, useData } from '../components/ui.jsx';
+import { Avatar, Badge, Bar, Field, Icon, Modal, RequirementChecklist, Tabs, useApp, useData } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import DealChat from '../components/DealChat.jsx';
 
@@ -277,8 +277,8 @@ function EstimateTab({ deal, isAdmin, canSell, busy, onSave, onAnalyze }) {
           <div style={{ padding: '0 24px 22px' }} className="stack">
             {edit.items.map((it, i) => (
               <div key={i} style={{ borderTop: '1px solid var(--line-2)', paddingTop: 16 }} className="stack">
-                <div className="row" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
-                  <div className="stack" style={{ flex: 1, gap: 8 }}>
+                <div className="row m-wrap" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+                  <div className="stack m-full" style={{ flex: 1, gap: 8 }}>
                     <input placeholder="ชื่อรายการ" value={it.title} onChange={(e) => setItem(i, { title: e.target.value })} aria-label="ชื่อรายการ" />
                     <input placeholder="รายละเอียด" value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} aria-label="รายละเอียด" />
                   </div>
@@ -366,9 +366,12 @@ function AssignDev({ deal, onDone, run }) {
           const current = d.name === deal.dev_name;
           return (
             <li key={d.id} className="row" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-              <div>
+              <div className="name-cell">
+                <Avatar user={d} size={36} />
+                <div>
                 {d.name} <span className="small muted">· {d.position ?? 'ไม่ระบุตำแหน่ง'}</span>
                 <div className="small muted">งานขายที่ถืออยู่ {d.open_deals} · งานโครงการค้าง {d.open_tasks}</div>
+                </div>
               </div>
               <div className="row" style={{ flexWrap: 'nowrap' }}>
                 <Badge tone={d.free ? 'ok' : 'warn'}>{d.free ? 'ว่าง' : 'มีงาน'}</Badge>

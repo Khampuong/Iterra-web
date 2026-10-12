@@ -3,7 +3,14 @@ import { q, getSettings, setSetting, DEFAULT_SETTINGS, SYSTEM_STEPS } from '../d
 import { requireAuth, requireRole, hashPassword, verifyPassword, setSession, clearSession, publicUser } from '../auth.js';
 import { GROUPS, PHASES, POSITIONS, POSITION_CODES, MEMBER_POSITIONS, MEMBER_POSITION_CODES } from '../positions.js';
 import { requirementOptions, cleanEffort } from '../estimator.js';
-import { emailEnabled } from '../mailer.js';
+import { emailConfig, sendMail } from '../mailer.js';
+
+// ไม่ส่งรหัสผ่าน SMTP กลับไปที่หน้าเว็บ บอกแค่ว่ามีการตั้งไว้หรือไม่
+function publicSettings() {
+  const s = getSettings();
+  const { pass, ...email } = s.email;
+  return { ...s, email: { ...email, pass: '', has_pass: Boolean(pass) } };
+}
 
 const router = Router();
 const admin = requireRole('admin');
@@ -38,6 +45,14 @@ router.post('/auth/logout', (_req, res) => {
 
 router.get('/auth/me', (req, res) => res.json(publicUser(req.user) ?? null));
 
+// สมาชิกเปลี่ยนภาพของตนเอง (ส่งค่าว่างเพื่อลบภาพ)
+router.put('/auth/avatar', requireAuth, (req, res) => {
+  const avatar = cleanAvatar(req.body?.avatar ?? '');
+  if (avatar === false) return res.status(400).json({ error: AVATAR_ERROR });
+  q.run('UPDATE users SET avatar = ? WHERE id = ?', avatar, req.user.id);
+  res.json({ ok: true, avatar });
+});
+
 router.put('/auth/password', requireAuth, (req, res) => {
   const { current, next } = req.body || {};
   if (!verifyPassword(String(current || ''), req.user.password_hash)) return res.status(400).json({ error: 'รหัสผ่านปัจจุบันไม่ถูกต้อง' });
@@ -51,21 +66,51 @@ router.get('/meta', requireAuth, (_req, res) => {
   res.json({
     groups: GROUPS, phases: PHASES, positions: POSITIONS, member_positions: MEMBER_POSITIONS,
     requirement_options: requirementOptions(),
-    email_enabled: emailEnabled,
+    email_enabled: emailConfig().enabled,
     sales_steps: getSettings().sales_steps,
     users: q.all('SELECT id, name, position, role FROM users WHERE active = 1 ORDER BY name'),
   });
 });
 
 // ---------- ตั้งค่า ----------
-router.get('/settings', admin, (_req, res) => res.json(getSettings()));
+router.get('/settings', admin, (_req, res) => res.json(publicSettings()));
+
+// ส่งอีเมลทดสอบถึงผู้ดูแลที่กดปุ่ม ด้วยค่าที่บันทึกไว้ และรอผลจริงจากเซิร์ฟเวอร์อีเมล
+router.post('/settings/email/test', admin, async (req, res) => {
+  const c = getSettings().email;
+  if (!c.host) return res.status(400).json({ error: 'กรุณากรอกและบันทึก SMTP Host ก่อนทดสอบ' });
+  try {
+    await sendMail(c, {
+      to: req.user.email, name: req.user.name, title: 'ทดสอบการแจ้งเตือนทางอีเมล',
+      body: 'ถ้าคุณได้รับอีเมลฉบับนี้ แสดงว่าระบบเชื่อมต่ออีเมลสำเร็จ สมาชิกจะได้รับการแจ้งเตือนทางอีเมลตามอีเมลในเมนูสมาชิก', link: '/settings',
+    });
+    res.json({ ok: true, to: req.user.email });
+  } catch (err) {
+    res.status(502).json({ error: `ส่งอีเมลไม่สำเร็จ: ${err.message}` });
+  }
+});
 
 router.put('/settings/:key', admin, (req, res) => {
   const { key } = req.params;
   if (!(key in DEFAULT_SETTINGS)) return res.status(404).json({ error: 'ไม่พบการตั้งค่านี้' });
   let value = req.body;
 
-  if (key === 'requirement_items') {
+  if (key === 'email') {
+    const old = getSettings().email;
+    const port = Number(value?.port) || 587;
+    if (port < 1 || port > 65535) return res.status(400).json({ error: 'พอร์ตไม่ถูกต้อง' });
+    const host = String(value?.host || '').trim();
+    if (value?.enabled && !host) return res.status(400).json({ error: 'กรุณากรอก SMTP Host ก่อนเปิดใช้' });
+    value = {
+      enabled: Boolean(value?.enabled),
+      host, port,
+      user: String(value?.user || '').trim(),
+      // เว้นรหัสผ่านว่าง = ใช้รหัสเดิมที่บันทึกไว้
+      pass: value?.pass ? String(value.pass) : old.pass,
+      from: String(value?.from || '').trim().slice(0, 200),
+      app_url: String(value?.app_url || '').trim().slice(0, 200) || old.app_url,
+    };
+  } else if (key === 'requirement_items') {
     if (!Array.isArray(value)) return res.status(400).json({ error: 'รูปแบบรายการไม่ถูกต้อง' });
     if (value.length > 40) return res.status(400).json({ error: 'เพิ่มรายการเองได้ไม่เกิน 40 รายการ' });
     const seen = new Set();
@@ -113,7 +158,7 @@ router.put('/settings/:key', admin, (req, res) => {
     }
   }
   setSetting(key, value);
-  res.json(getSettings());
+  res.json(publicSettings());
 });
 
 // ---------- ผู้ใช้ ----------
@@ -125,8 +170,17 @@ function cleanPhone(value) {
 }
 const PHONE_ERROR = 'เบอร์โทรศัพท์ต้องเป็นตัวเลขไม่เกิน 10 หลัก';
 
+// ภาพสมาชิก: รับเฉพาะ data URL ของรูป PNG/JPEG/WebP ขนาดไม่เกิน ~200KB — null ถ้าไม่ใส่, false ถ้าไม่ถูกต้อง
+function cleanAvatar(value) {
+  if (value == null || value === '') return null;
+  const s = String(value);
+  if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(s) || s.length > 280_000) return false;
+  return s;
+}
+const AVATAR_ERROR = 'ภาพไม่ถูกต้อง ต้องเป็นไฟล์รูป PNG, JPG หรือ WebP';
+
 router.get('/users', admin, (_req, res) => {
-  res.json(q.all('SELECT id, name, email, phone, role, position, active, created_at FROM users ORDER BY active DESC, id'));
+  res.json(q.all('SELECT id, name, email, phone, avatar, role, position, active, created_at FROM users ORDER BY active DESC, id'));
 });
 
 router.post('/users', admin, (req, res) => {
@@ -136,11 +190,13 @@ router.post('/users', admin, (req, res) => {
   if (String(b.password || '').length < 8) return res.status(400).json({ error: 'รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร' });
   if (q.get('SELECT id FROM users WHERE email = ?', email)) return res.status(409).json({ error: 'อีเมลนี้มีอยู่แล้ว' });
   const phone = cleanPhone(b.phone);
+  const avatar = cleanAvatar(b.avatar);
+  if (avatar === false) return res.status(400).json({ error: AVATAR_ERROR });
   if (phone === false) return res.status(400).json({ error: PHONE_ERROR });
   q.run(
-    'INSERT INTO users (name, email, password_hash, role, position, phone) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO users (name, email, password_hash, role, position, phone, avatar) VALUES (?, ?, ?, ?, ?, ?, ?)',
     b.name.trim(), email, hashPassword(b.password), ROLES.includes(b.role) ? b.role : 'staff',
-    MEMBER_POSITION_CODES.includes(b.position) ? b.position : null, phone,
+    MEMBER_POSITION_CODES.includes(b.position) ? b.position : null, phone, avatar,
   );
   res.status(201).json({ ok: true });
 });
@@ -156,13 +212,22 @@ router.put('/users/:id', admin, (req, res) => {
     if (!others) return res.status(409).json({ error: 'ต้องมีผู้ดูแลระบบอย่างน้อย 1 คน' });
   }
   if (b.password && String(b.password).length < 8) return res.status(400).json({ error: 'รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร' });
+  // แก้อีเมลสมาชิกได้ (ใช้ทั้งเข้าระบบและรับอีเมลแจ้งเตือน)
+  let email = u.email;
+  if (b.email != null && String(b.email).trim().toLowerCase() !== u.email) {
+    email = String(b.email).trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'อีเมลไม่ถูกต้อง' });
+    if (q.get('SELECT id FROM users WHERE email = ? AND id != ?', email, u.id)) return res.status(409).json({ error: 'อีเมลนี้มีสมาชิกคนอื่นใช้อยู่แล้ว' });
+  }
+  const avatar = 'avatar' in b ? cleanAvatar(b.avatar) : u.avatar;
+  if (avatar === false) return res.status(400).json({ error: AVATAR_ERROR });
   const phone = 'phone' in b ? cleanPhone(b.phone) : u.phone;
   if (phone === false) return res.status(400).json({ error: PHONE_ERROR });
   q.run(
-    'UPDATE users SET name = ?, role = ?, position = ?, active = ?, password_hash = ?, phone = ? WHERE id = ?',
+    'UPDATE users SET name = ?, role = ?, position = ?, active = ?, password_hash = ?, phone = ?, email = ?, avatar = ? WHERE id = ?',
     b.name?.trim() || u.name, role,
     'position' in b ? (MEMBER_POSITION_CODES.includes(b.position) ? b.position : null) : u.position,
-    active, b.password ? hashPassword(b.password) : u.password_hash, phone, u.id,
+    active, b.password ? hashPassword(b.password) : u.password_hash, phone, email, avatar, u.id,
   );
   res.json({ ok: true });
 });

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, phoneDigits, ROLE_LABEL } from '../lib.js';
-import { Badge, Field, Icon, Modal, Tabs, useApp, useData } from '../components/ui.jsx';
+import { Avatar, Badge, Field, Icon, Modal, PhotoPicker, Tabs, useApp, useData } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 
 export default function Settings() {
@@ -13,18 +13,19 @@ export default function Settings() {
     const out = await run(() => api.put(`/settings/${key}`, value), 'บันทึกการตั้งค่าแล้ว');
     if (out) {
       setSettings(out);
-      if (key === 'sales_steps' || key === 'requirement_items') loadMeta();
+      if (key === 'sales_steps' || key === 'requirement_items' || key === 'email') loadMeta();
     }
   };
 
   return (
     <>
       <PageHead eyebrow="ผู้ดูแลระบบ" title="ตั้งค่า" sub="อัตราค่าแรง ราคา งวดชำระ การแบ่งผลประโยชน์ และข้อมูลบริษัท" />
-      <Tabs value={tab} onChange={setTab} tabs={[['pricing', 'ราคาและค่าแรง'], ['terms', 'งวดชำระและผลประโยชน์'], ['steps', 'ขั้นตอนงานขาย'], ['checklist', 'เช็คลิสต์ Requirement'], ['company', 'ข้อมูลบริษัท']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['pricing', 'ราคาและค่าแรง'], ['terms', 'งวดชำระและผลประโยชน์'], ['steps', 'ขั้นตอนงานขาย'], ['checklist', 'เช็คลิสต์ Requirement'], ['email', 'อีเมลแจ้งเตือน'], ['company', 'ข้อมูลบริษัท']]} />
       {tab === 'pricing' && <Pricing settings={settings} save={save} />}
       {tab === 'terms' && <Terms settings={settings} save={save} />}
       {tab === 'steps' && <SalesSteps settings={settings} save={save} />}
       {tab === 'checklist' && <ChecklistItems settings={settings} save={save} />}
+      {tab === 'email' && <EmailSettings settings={settings} save={save} />}
       {tab === 'company' && <Company settings={settings} save={save} />}
     </>
   );
@@ -215,6 +216,67 @@ function SalesSteps({ settings, save }) {
   );
 }
 
+// การเชื่อมต่ออีเมลแจ้งเตือน: ทุกการแจ้งเตือนในระบบจะส่งถึงอีเมลของสมาชิกด้วย
+function EmailSettings({ settings, save }) {
+  const { run, meta, user } = useApp();
+  const [f, setF] = useState(settings.email);
+  const [testing, setTesting] = useState(false);
+  useEffect(() => setF(settings.email), [settings.email]);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const dirty = JSON.stringify(f) !== JSON.stringify(settings.email);
+
+  const test = async () => {
+    setTesting(true);
+    const out = await run(() => api.post('/settings/email/test'));
+    setTesting(false);
+    if (out) window.alert(`ส่งอีเมลทดสอบไปที่ ${out.to} แล้ว กรุณาตรวจกล่องจดหมาย (และโฟลเดอร์สแปม)`);
+  };
+
+  return (
+    <div className="stack">
+      <div className="card stack">
+        <div className="card-head" style={{ marginBottom: 0 }}>
+          <div>
+            <h2>เชื่อมต่ออีเมลแจ้งเตือน</h2>
+            <p className="small muted">เมื่อเปิดใช้ ทุกการแจ้งเตือนในระบบจะส่งถึงอีเมลของสมาชิกแต่ละคนด้วย (ใช้อีเมลในเมนูสมาชิก)</p>
+          </div>
+          <Badge tone={meta.email_enabled ? 'ok' : ''}>{meta.email_enabled ? 'เปิดใช้อยู่' : 'ยังไม่เปิดใช้'}</Badge>
+        </div>
+        <label className="row" style={{ gap: 8 }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={Boolean(f.enabled)} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />
+          เปิดส่งการแจ้งเตือนทางอีเมล
+        </label>
+        <div className="grid g2">
+          <Field label="SMTP Host"><input value={f.host} onChange={set('host')} placeholder="smtp.gmail.com" /></Field>
+          <Field label="พอร์ต (465 = SSL, 587 = STARTTLS)"><input type="number" min="1" max="65535" value={f.port} onChange={set('port')} /></Field>
+          <Field label="ชื่อผู้ใช้ (อีเมลผู้ส่ง)"><input value={f.user} onChange={set('user')} autoComplete="off" placeholder="you@gmail.com" /></Field>
+          <Field label={f.has_pass ? 'รหัสผ่าน (บันทึกไว้แล้ว — เว้นว่างถ้าไม่เปลี่ยน)' : 'รหัสผ่าน / App Password'}>
+            <input type="password" value={f.pass} onChange={set('pass')} autoComplete="new-password" placeholder={f.has_pass ? '••••••••' : ''} />
+          </Field>
+          <Field label="ชื่อและอีเมลผู้ส่งที่แสดง"><input value={f.from} onChange={set('from')} placeholder="Iterra <you@gmail.com>" /></Field>
+          <Field label="ที่อยู่ของระบบ (ใช้ทำลิงก์ในอีเมล)"><input value={f.app_url} onChange={set('app_url')} placeholder="https://..." /></Field>
+        </div>
+        <div className="row">
+          <button className="btn primary" disabled={!dirty} onClick={() => save('email', f)}>บันทึก</button>
+          <button className="btn" disabled={dirty || testing || !settings.email.host} onClick={test} title={dirty ? 'บันทึกก่อนทดสอบ' : ''}>
+            {testing ? 'กำลังส่ง…' : `ส่งอีเมลทดสอบถึงฉัน (${user.email})`}
+          </button>
+        </div>
+      </div>
+      <div className="card">
+        <h3>วิธีตั้งค่ากับ Gmail</h3>
+        <ul className="plain">
+          <li>SMTP Host: <b>smtp.gmail.com</b> · พอร์ต: <b>465</b></li>
+          <li>ชื่อผู้ใช้: อีเมล Gmail ที่จะใช้ส่ง</li>
+          <li>รหัสผ่าน: ต้องใช้ <b>App Password</b> 16 ตัว (สร้างที่ บัญชี Google → ความปลอดภัย → การยืนยันแบบ 2 ขั้นตอน → รหัสผ่านสำหรับแอป) ใช้รหัสผ่าน Gmail ปกติไม่ได้</li>
+          <li>ผู้ให้บริการอื่น ให้ใช้ค่า SMTP ที่ผู้ให้บริการกำหนด</li>
+        </ul>
+        <p className="small muted" style={{ marginTop: 10 }}>สมาชิกที่อีเมลไม่ใช่อีเมลจริง (เช่น ลงท้ายด้วย @iterra.local) จะไม่ได้รับอีเมล แก้อีเมลได้ที่เมนูสมาชิก</p>
+      </div>
+    </div>
+  );
+}
+
 function Company({ settings, save }) {
   const [f, setF] = useState(settings.company);
   const input = (k, label, wide) => (
@@ -265,7 +327,7 @@ function Users() {
     <div className="card flush">
       <div className="card-head">
         <div><h2>สมาชิกทั้งหมด</h2><p className="small muted">ตำแหน่งงานใช้มอบหมายงานอัตโนมัติเมื่อเปิดโครงการ</p></div>
-        <button className="btn primary sm" onClick={() => setForm({ name: '', email: '', phone: '', password: '', role: 'staff', position: '' })}><Icon name="plus" />เพิ่มสมาชิก</button>
+        <button className="btn primary sm" onClick={() => setForm({ name: '', email: '', phone: '', avatar: '', password: '', role: 'staff', position: '' })}><Icon name="plus" />เพิ่มสมาชิก</button>
       </div>
       <div className="table-wrap">
         <table>
@@ -273,14 +335,14 @@ function Users() {
           <tbody>
             {(users ?? []).map((u) => (
               <tr key={u.id}>
-                <td>{u.name}</td>
+                <td><div className="name-cell"><Avatar user={u} size={36} />{u.name}</div></td>
                 <td>{u.email}</td>
                 <td className="num nowrap">{u.phone || '—'}</td>
                 <td>{ROLE_LABEL[u.role]}</td>
                 <td>{meta.member_positions.find((p) => p.code === u.position)?.name ?? '—'}</td>
                 <td><Badge tone={u.active ? 'ok' : ''}>{u.active ? 'ใช้งาน' : 'ปิดใช้งาน'}</Badge></td>
                 <td className="right nowrap">
-                  <button className="btn sm ghost" onClick={() => setForm({ ...u, position: u.position ?? '', phone: u.phone ?? '', password: '' })}>แก้ไข</button>
+                  <button className="btn sm ghost" onClick={() => setForm({ ...u, position: u.position ?? '', phone: u.phone ?? '', avatar: u.avatar ?? '', password: '' })}>แก้ไข</button>
                   <button className="btn sm ghost" onClick={() => toggle(u)}>{u.active ? 'ปิดใช้งาน' : 'เปิดใช้งาน'}</button>
                 </td>
               </tr>
@@ -291,8 +353,12 @@ function Users() {
       {form && (
         <Modal title={form.id ? 'แก้ไขสมาชิก' : 'เพิ่มสมาชิก'} onClose={() => setForm(null)} footer={<><button className="btn" onClick={() => setForm(null)}>ยกเลิก</button><button className="btn primary" onClick={save}>บันทึก</button></>}>
           <div className="grid g2">
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <span>ภาพสมาชิก</span>
+              <PhotoPicker name={form.name} value={form.avatar} onChange={(avatar) => setForm({ ...form, avatar })} />
+            </div>
             <Field label="ชื่อ"><input value={form.name} onChange={set('name')} autoFocus /></Field>
-            <Field label="อีเมล"><input type="email" value={form.email} onChange={set('email')} disabled={Boolean(form.id)} /></Field>
+            <Field label="อีเมล"><input type="email" value={form.email} onChange={set('email')} /></Field>
             <Field label="เบอร์โทรศัพท์ (ตัวเลขไม่เกิน 10 หลัก)" style={{ gridColumn: '1 / -1' }}>
               <input type="tel" inputMode="numeric" maxLength={10} value={form.phone} onChange={(e) => setForm({ ...form, phone: phoneDigits(e.target.value) })} />
             </Field>

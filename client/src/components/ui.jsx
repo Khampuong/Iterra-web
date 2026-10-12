@@ -3,13 +3,17 @@ import { api } from '../lib.js';
 
 const PATHS = {
   grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  menu: 'M4 7h16M4 12h16M4 17h16',
+  close: 'M6 6l12 12M18 6L6 18',
   deal: 'M4 8h16v11H4zM9 8V5h6v3M4 13h16',
   layers: 'M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5',
   wallet: 'M3 7h16a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7zm0 0V6a2 2 0 012-2h11M16 13h2',
   pie: 'M12 3v9h9a9 9 0 11-9-9zM15 3.5A9 9 0 0120.5 9H15z',
   cog: 'M12 9a3 3 0 100 6 3 3 0 000-6zM4 12h2m12 0h2M12 4v2m0 12v2M6.3 6.3l1.4 1.4m8.6 8.6l1.4 1.4M6.3 17.7l1.4-1.4m8.6-8.6l1.4-1.4',
   users: 'M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM2.5 20a6.5 6.5 0 0113 0M16 4.3a3.5 3.5 0 010 6.4M18 14.2a6.5 6.5 0 013.5 5.8',
-  bell:'M6 16V11a6 6 0 1112 0v5l1.5 2h-15zM10 20a2 2 0 004 0',
+  user: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4.5 20a7.5 7.5 0 0115 0',
+  lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 017 0v3M12 14.5v2.5',
+  bell: 'M6 16V11a6 6 0 1112 0v5l1.5 2h-15zM10 20a2 2 0 004 0',
   plus: 'M12 5v14M5 12h14',
   print: 'M7 8V4h10v4M7 17H5a1 1 0 01-1-1v-6a1 1 0 011-1h14a1 1 0 011 1v6a1 1 0 01-1 1h-2M7 14h10v6H7z',
   spark: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z',
@@ -24,6 +28,64 @@ export function Icon({ name }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d={PATHS[name]} />
     </svg>
+  );
+}
+
+// ภาพสมาชิก: แสดงรูป ถ้าไม่มีแสดงอักษรตัวแรกของชื่อ
+export function Avatar({ user, size = 34 }) {
+  const style = { width: size, height: size, fontSize: Math.round(size * 0.42) };
+  return user?.avatar
+    ? <img className="avatar" style={style} src={user.avatar} alt="" />
+    : <span className="avatar" style={style} aria-hidden="true">{(user?.name ?? '?').trim().charAt(0)}</span>;
+}
+
+// ย่อและครอบรูปเป็นสี่เหลี่ยมจัตุรัส 256px ก่อนส่ง เพื่อให้ไฟล์เล็ก
+function resizeToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const side = Math.min(img.naturalWidth, img.naturalHeight);
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 256;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, 256, 256);
+      ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, 256, 256);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('เปิดไฟล์รูปนี้ไม่ได้')); };
+    img.src = url;
+  });
+}
+
+// ตัวเลือกภาพสมาชิก: value = data URL หรือ '' · onChange รับค่าใหม่
+export function PhotoPicker({ name, value, onChange }) {
+  const { toast } = useApp();
+  const pick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return toast('กรุณาเลือกไฟล์รูปภาพ', 'error');
+    try {
+      onChange(await resizeToDataUrl(file));
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+  return (
+    <div className="row" style={{ gap: 14 }}>
+      <Avatar user={{ name, avatar: value }} size={72} />
+      <div className="row">
+        <label className="btn sm">
+          {value ? 'เปลี่ยนภาพ' : 'เลือกภาพ'}
+          <input type="file" accept="image/*" onChange={pick} hidden />
+        </label>
+        {value && <button type="button" className="btn sm ghost danger" onClick={() => onChange('')}>ลบภาพ</button>}
+        <span className="small muted">ระบบจะครอบเป็นสี่เหลี่ยมจัตุรัสและย่อให้อัตโนมัติ</span>
+      </div>
+    </div>
   );
 }
 

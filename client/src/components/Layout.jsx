@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { ALL_ROLES, api, canEditDemo, date, PROJECTS, ROLE_LABEL, WIDE } from '../lib.js';
-import { Field, Icon, Modal, useApp } from './ui.jsx';
+import { Avatar, Field, Icon, Modal, PhotoPicker, useApp } from './ui.jsx';
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: 'grid', roles: [...WIDE, 'staff'], end: true },
@@ -68,6 +68,25 @@ function Notifications() {
   );
 }
 
+// สมาชิกเปลี่ยนภาพของตนเอง
+function PhotoModal({ onClose }) {
+  const { user, setUser, run, loadMeta } = useApp();
+  const [value, setValue] = useState(user.avatar ?? '');
+  const save = async () => {
+    const out = await run(() => api.put('/auth/avatar', { avatar: value }), 'บันทึกภาพแล้ว');
+    if (out) {
+      setUser({ ...user, avatar: out.avatar });
+      loadMeta();
+      onClose();
+    }
+  };
+  return (
+    <Modal title="ภาพของฉัน" onClose={onClose} footer={<><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn primary" disabled={value === (user.avatar ?? '')} onClick={save}>บันทึก</button></>}>
+      <PhotoPicker name={user.name} value={value} onChange={setValue} />
+    </Modal>
+  );
+}
+
 function PasswordModal({ onClose }) {
   const { run } = useApp();
   const [f, setF] = useState({ current: '', next: '' });
@@ -87,14 +106,26 @@ function PasswordModal({ onClose }) {
 export default function Layout() {
   const { user, setUser } = useApp();
   const [pw, setPw] = useState(false);
+  const [photo, setPhoto] = useState(false);
+  // จอเล็ก: เมนูเป็นลิ้นชักเลื่อนจากซ้าย เปิดด้วยปุ่มเมนู และปิดเองเมื่อเปลี่ยนหน้า
+  const [menu, setMenu] = useState(false);
+  const loc = useLocation();
+  useEffect(() => setMenu(false), [loc.pathname]);
+  useEffect(() => {
+    if (!menu) return undefined;
+    const onKey = (e) => e.key === 'Escape' && setMenu(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menu]);
   const logout = () => api.post('/auth/logout').finally(() => setUser(null));
 
   return (
     <div className="shell">
-      <aside className="side">
+      {menu && <div className="side-back" onClick={() => setMenu(false)} />}
+      <aside className={`side${menu ? ' open' : ''}`} id="main-menu">
         <div className="brand">
-          <b>ITERRA</b>
-          <span>PROJECT OPERATIONS</span>
+          <img src="/logo-mark.png" alt="ITERRA" width="480" height="296" />
+          <button className="btn ghost sm menu-close" onClick={() => setMenu(false)} aria-label="ปิดเมนู"><Icon name="close" /></button>
         </div>
         {NAV.filter((n) => n.roles.includes(user.role) && (!n.when || n.when(user))).map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
@@ -113,15 +144,18 @@ export default function Layout() {
       </aside>
       <div className="main">
         <div className="top">
+          <button className="btn ghost menu-btn" onClick={() => setMenu(true)} aria-label="เปิดเมนู" aria-expanded={menu} aria-controls="main-menu"><Icon name="menu" /></button>
+          <img className="top-brand" src="/logo-mark.png" alt="ITERRA" width="480" height="296" />
           <Notifications />
-          <div className="top-user" title={user.email}>
-            <span className="avatar" aria-hidden="true">{user.name.trim().charAt(0)}</span>
+          <button className="top-user" title="เปลี่ยนภาพของฉัน" onClick={() => setPhoto(true)}>
+            <Avatar user={user} />
             <span><b>{user.name}</b><small>{ROLE_LABEL[user.role]}{user.position ? ` · ${user.position}` : ''}</small></span>
-          </div>
+          </button>
         </div>
         <div className="page"><Outlet /></div>
       </div>
       {pw && <PasswordModal onClose={() => setPw(false)} />}
+      {photo && <PhotoModal onClose={() => setPhoto(false)} />}
     </div>
   );
 }
