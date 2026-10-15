@@ -196,6 +196,15 @@ router.get('/notifications', requireAuth, (req, res) => {
   res.json({ alerts: alerts.slice(0, 30), events, unread: events.filter((e) => !e.read).length + alerts.length });
 });
 
+router.get('/notifications/all', requireAuth, (req, res) => {
+  res.json(q.all('SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 200', req.user.id));
+});
+
+router.post('/notifications/:id/read', requireAuth, (req, res) => {
+  q.run('UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?', Number(req.params.id), req.user.id);
+  res.json({ ok: true });
+});
+
 router.post('/notifications/read', requireAuth, (req, res) => {
   q.run('UPDATE notifications SET read = 1 WHERE user_id = ?', req.user.id);
   res.json({ ok: true });

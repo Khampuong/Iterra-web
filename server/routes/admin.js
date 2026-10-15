@@ -66,6 +66,7 @@ router.get('/meta', requireAuth, (_req, res) => {
   res.json({
     groups: GROUPS, phases: PHASES, positions: POSITIONS, member_positions: MEMBER_POSITIONS,
     requirement_options: requirementOptions(),
+    max_sales_discount_percent: getSettings().pricing.max_sales_discount_percent,
     email_enabled: emailConfig().enabled,
     sales_steps: getSettings().sales_steps,
     users: q.all('SELECT id, name, position, role FROM users WHERE active = 1 ORDER BY name'),

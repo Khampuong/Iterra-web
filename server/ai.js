@@ -52,6 +52,7 @@ const AnalysisSchema = z.object({
     z.object({
       title: z.string(),
       description: z.string(),
+      priority: z.enum(['must', 'should', 'could']).describe('must = ขาดไม่ได้, should = สำคัญ, could = เลื่อนไปเฟส 2 ได้ถ้าเกินงบ'),
       effort: z.array(z.object({ position: z.enum(POSITION_CODES), days: z.number() })),
     }),
   ),
@@ -68,6 +69,8 @@ ${POSITIONS.map((p) => `- ${p.code}: ${p.name} (${p.th})`).join('\n')}
 - ไม่ต้องประเมินราคา ระบบจะคำนวณราคาจากอัตราค่าแรงเอง
 - technical_score สะท้อนความชัดเจนของ Requirement และความยากทางเทคนิค ไม่เกี่ยวกับงบหรือกำหนดเวลา
 - duration_days คือวันทำการตั้งแต่เริ่มจนส่งมอบ โดยคิดว่างานหลายตำแหน่งทำขนานกันได้
+- ระบุ priority ทุกรายการ: งานพื้นฐาน (เก็บ Requirement ออกแบบ ทดสอบ นำขึ้นใช้งาน) และฟีเจอร์หลักที่ขาดไม่ได้ = must, ฟีเจอร์ที่ลูกค้าขอ = should, ส่วนเสริมที่เลื่อนไปเฟส 2 ได้ = could
+- ถ้าลูกค้าแจ้งงบประมาณ ให้ออกแบบขอบเขตเฟสแรกแบบกระชับ (MVP) ที่เหมาะกับงบ ระบบจะเลื่อนรายการ could/should ไปเฟส 2 และลดกำลังคนให้ราคาพอดีงบเอง
 - ถ้า Requirement กำกวม ให้ตั้งสมมติฐานที่สมเหตุสมผลแล้วระบุไว้ใน assumptions และ questions
 - ตอบเป็นภาษาไทยทั้งหมด`;
 
@@ -85,7 +88,7 @@ export async function analyzeRequirement(deal) {
           content: `ชื่องาน: ${deal.title}
 ประเภทงาน: ${deal.project_type || '-'}
 ลูกค้า: ${deal.customer_company || deal.customer_name}
-งบประมาณที่ลูกค้าแจ้ง: ${deal.budget ? `${deal.budget} บาท` : 'ไม่ระบุ'}
+งบประมาณที่ลูกค้าแจ้ง: ${deal.budget ? `${deal.budget} บาท (ก่อน VAT)` : 'ไม่ระบุ'}
 วันที่ต้องการใช้งาน: ${deal.deadline || 'ไม่ระบุ'}
 
 สิ่งที่ลูกค้าเลือกจากเช็คลิสต์ (ต้องมีในรายการงาน):

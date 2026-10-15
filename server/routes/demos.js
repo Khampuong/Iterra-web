@@ -1,11 +1,15 @@
 // หน้า Demo สำหรับทีมพัฒนา: เพิ่ม/แก้ข้อมูลที่แสดงบนหน้า Demo ของแต่ละงานขาย
 // ผู้ใช้กลุ่มนี้เห็นเฉพาะข้อมูลที่ต้องใช้ทำ Demo (ไม่เห็นราคาและเอกสาร)
 import { Router } from 'express';
-import { q, notify } from '../db.js';
+import { q, notify, getSettings } from '../db.js';
 import { canEditDemo } from '../auth.js';
 import { parseChecks, requirementOptions } from '../estimator.js';
 import { cleanDemoData, demoDataOf, renderDemo } from '../demo-template.js';
 import { cleanHttpUrl } from '../url.js';
+import { dealTotals, feasibility, priceItem } from '../estimator.js';
+import { notifyDealTeam } from './teamwork.js';
+
+const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
 
 const router = Router();
 
@@ -27,11 +31,53 @@ function findDeal(req, res) {
   return deal;
 }
 
+// ความเป็นไปได้ของงาน (ไม่ส่งราคาให้ dev)
+function feasibilityOf(deal) {
+  const settings = getSettings();
+  const items = q.all('SELECT * FROM deal_items WHERE deal_id = ?', deal.id).map((i) => priceItem(i, settings));
+  if (!items.length) return null;
+  return feasibility(deal, dealTotals(items, deal, settings), settings);
+}
+
+// dev ต้องกดรับงานก่อนจึงประเมิน/ส่งลิงก์ได้ (admin ทำแทนได้)
+function needAccepted(req, res, deal) {
+  if (req.user.role === 'admin' || deal.dev_accepted_at) return true;
+  res.status(409).json({ error: 'กรุณากดรับงานก่อน' });
+  return false;
+}
+
+// dev กดรับงานที่ผู้ถือหุ้นส่งให้
+router.post('/:id/accept', (req, res) => {
+  const deal = findDeal(req, res);
+  if (!deal) return;
+  if (deal.dev_id !== req.user.id) return res.status(403).json({ error: 'เฉพาะ dev ที่ได้รับเลือกเท่านั้นที่กดรับงานได้' });
+  if (!deal.dev_accepted_at) {
+    q.run("UPDATE deals SET dev_accepted_at = datetime('now') WHERE id = ?", deal.id);
+    notifyDealTeam(deal, req.user.id, { title: `${req.user.name} กดรับงาน ${deal.code} แล้ว`, body: `${deal.title} — คุยงานกับ dev ได้ที่แท็บ “คุยงานกับ dev”`, link: `/deals/${deal.id}?tab=team` });
+  }
+  res.json({ ok: true });
+});
+
+// dev ปรับคะแนนความเป็นไปได้ทางเทคนิคหลังดู Requirement พร้อมเหตุผล
+router.put('/:id/feasibility', (req, res) => {
+  const deal = findDeal(req, res);
+  if (!deal || !needAccepted(req, res, deal)) return;
+  if (!deal.analysis) return res.status(409).json({ error: 'งานนี้ยังไม่ได้วิเคราะห์ Requirement' });
+  const score = Number(req.body?.technical_score);
+  if (req.body?.technical_score === '' || !Number.isFinite(score)) return res.status(400).json({ error: 'กรุณาใส่คะแนน 0–100' });
+  const note = String(req.body?.note || '').trim().slice(0, 1000);
+  const analysis = JSON.parse(deal.analysis);
+  const review = { score: clamp(score), before: analysis.dev_review?.before ?? analysis.technical_score, note, by: req.user.name, at: new Date().toISOString() };
+  q.run('UPDATE deals SET analysis = ? WHERE id = ?', JSON.stringify({ ...analysis, technical_score: review.score, dev_review: review }), deal.id);
+  notifyDealTeam(deal, req.user.id, { title: `dev ปรับประเมินความเป็นไปได้ ${deal.code}`, body: `ความเป็นไปได้ทางเทคนิค ${review.score}/100${note ? ' — ' + note.slice(0, 120) : ''}`, link: `/deals/${deal.id}?tab=estimate` });
+  res.json({ ok: true });
+});
+
 router.get('/', (req, res) => {
   const mine = req.user.role === 'admin' ? '' : 'AND d.dev_id = ?';
   res.json(q.all(
     `SELECT d.id, d.code, d.title, d.status, d.customer_name, d.customer_company, d.demo_source, d.demo_url,
-            d.demo_html IS NOT NULL AS has_demo, u.name AS sales_name, d.dev_id, dv.name AS dev_name
+            d.demo_html IS NOT NULL AS has_demo, u.name AS sales_name, d.dev_id, dv.name AS dev_name, d.dev_accepted_at
      FROM deals d LEFT JOIN users u ON u.id = d.sales_id LEFT JOIN users dv ON dv.id = d.dev_id WHERE d.status != 'lost' ${mine} ORDER BY d.id DESC`,
     ...(mine ? [req.user.id] : []),
   ));
@@ -49,6 +95,10 @@ router.get('/:id', (req, res) => {
     dev_id: deal.dev_id,
     dev_name: deal.dev_id ? q.get('SELECT name FROM users WHERE id = ?', deal.dev_id)?.name ?? null : null,
     can_chat: req.user.role === 'admin' || deal.dev_id === req.user.id || deal.sales_id === req.user.id,
+    dev_accepted_at: deal.dev_accepted_at,
+    is_dev: deal.dev_id === req.user.id,
+    feasibility: feasibilityOf(deal),
+    dev_review: deal.analysis ? JSON.parse(deal.analysis).dev_review ?? null : null,
     requirement: deal.requirement,
     checklist: requirementOptions().filter((o) => checks.includes(o.id)).map((o) => o.title),
     items,
@@ -101,11 +151,14 @@ router.put('/:id', (req, res) => {
 router.put('/:id/link', (req, res) => {
   const deal = findDeal(req, res);
   if (!deal) return;
+  if (!needAccepted(req, res, deal)) return;
   const { url, error } = cleanHttpUrl(req.body?.url);
   if (error) return res.status(400).json({ error });
   q.run('UPDATE deals SET demo_url = ? WHERE id = ?', url, deal.id);
-  if (url && url !== deal.demo_url && deal.sales_id && deal.sales_id !== req.user.id) {
-    notify({ user_id: deal.sales_id, title: `มีลิงก์ Demo สำหรับ ${deal.code}`, body: `${deal.title} — ${req.user.name} แนบลิงก์ให้ดูก่อนนำไปขาย`, link: `/deals/${deal.id}` });
+  if (url && url !== deal.demo_url) {
+    // ส่งลิงก์เข้าห้องคุยงานด้วย ให้พนักงานขายเห็นในแชต
+    q.run('INSERT INTO deal_messages (deal_id, user_id, body) VALUES (?, ?, ?)', deal.id, req.user.id, `ส่งลิงก์ Demo: ${url}`);
+    notifyDealTeam(deal, req.user.id, { title: `มีลิงก์ Demo สำหรับ ${deal.code}`, body: `${deal.title} — ${req.user.name} ส่งลิงก์ให้ดูก่อนนำไปเสนอลูกค้า`, link: `/deals/${deal.id}?tab=demo` });
   }
   res.json({ ok: true, demo_url: url });
 });

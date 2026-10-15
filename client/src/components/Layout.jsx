@@ -9,7 +9,7 @@ const NAV = [
   { to: '/projects', label: 'โครงการ', icon: 'layers', roles: PROJECTS },
   { to: '/sharing', label: 'แบ่งผลประโยชน์', icon: 'pie', roles: WIDE },
   { to: '/finance', label: 'รายรับรายจ่าย', icon: 'wallet', roles: WIDE },
-  { to: '/demos', label: 'หน้า Demo', icon: 'spark', roles: ALL_ROLES, when: canEditDemo },
+  { to: '/demos', label: 'งาน dev', icon: 'spark', roles: ALL_ROLES, when: canEditDemo },
   { to: '/members', label: 'สมาชิก', icon: 'users', roles: ['admin'] },
   { to: '/settings', label: 'ตั้งค่า', icon: 'cog', roles: ['admin'] },
 ];
@@ -57,11 +57,12 @@ function Notifications() {
           <h3>ความเคลื่อนไหว <span className="small muted" style={{ fontWeight: 400 }}>· {meta?.email_enabled ? 'ส่งอีเมลแจ้งด้วย' : 'ยังไม่ได้เปิดแจ้งทางอีเมล'}</span></h3>
           {data.events.length === 0 && <div className="empty">ยังไม่มีการแจ้งเตือน</div>}
           {data.events.map((e) => (
-            <Link key={e.id} to={e.link || '#'} className={`pop-item${e.read ? '' : ' unread'}`}>
+            <Link key={e.id} to={e.link || '/notifications'} className={`pop-item${e.read ? '' : ' unread'}`}>
               <div>{e.title}</div>
               <div className="small muted">{e.body} · {date(e.created_at)}</div>
             </Link>
           ))}
+          <Link to="/notifications" className="pop-all">ดูการแจ้งเตือนทั้งหมด</Link>
         </div>
       )}
     </div>

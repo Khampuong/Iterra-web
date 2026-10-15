@@ -79,6 +79,7 @@ export default function PrintDoc() {
               <div>
                 <div className="label">โครงการ</div>
                 <b>{d.deal.title}</b>
+                {d.extra && <div><b>งานเพิ่มเติม #{d.extra.no}: {d.extra.title}</b>{d.extra.contract && ` · ตามสัญญา ${d.extra.contract}`}</div>}
                 <div>อ้างอิง {d.deal.code} · ระยะเวลา {d.deal.duration_days} วันทำการ</div>
                 {d.sales && <div className="small">ผู้เสนอราคา {d.sales.name} · {d.sales.email}</div>}
               </div>
@@ -90,6 +91,18 @@ export default function PrintDoc() {
                 <Totals rows={[['รวมรายการ', d.totals.subtotal], d.totals.discount > 0 && ['ส่วนลด', -d.totals.discount], ['มูลค่าก่อนภาษี', d.totals.net], [`ภาษีมูลค่าเพิ่ม ${d.totals.vat_percent}%`, d.totals.vat]]} total={d.totals.total} />
                 <div className="label">เงื่อนไขการชำระเงิน</div>
                 <ul className="plain" style={{ marginBottom: 12 }}>{d.payment_terms.map((t, i) => <li key={i}>{t.label} — {t.percent}%</li>)}</ul>
+                {d.phase2?.length > 0 && (
+                  <>
+                    <div className="label">งานเฟส 2 (ไม่รวมในราคานี้ เสนอราคาแยกเมื่อพร้อม)</div>
+                    <ul className="plain" style={{ marginBottom: 12 }}>{d.phase2.map((p, i) => <li key={i}>{p.title}</li>)}</ul>
+                  </>
+                )}
+                {d.quote_note && (
+                  <>
+                    <div className="label">หมายเหตุ / เงื่อนไขเพิ่มเติม</div>
+                    <p style={{ whiteSpace: 'pre-wrap', margin: '0 0 12px' }}>{d.quote_note}</p>
+                  </>
+                )}
                 <div className="small muted">ราคาไม่รวมค่า Server, Domain และบริการของบุคคลที่สาม เว้นแต่ระบุไว้ในรายการ · ขอบเขตงานนอกเหนือจากรายการข้างต้นจะเสนอราคาเพิ่มเติม</div>
               </>
             ) : (

@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom';
 import { api, date, money, money2, PROJECT_STATUS, TASK_STATUS, todayStr, WIDE } from '../lib.js';
 import { Badge, Bar, Field, Icon, Modal, Stat, Tabs, useApp, useData } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
+import ProjectTimeline from '../components/ProjectCalendar.jsx';
+import TimelineEditor from '../components/TimelineEditor.jsx';
 
 const dayNum = (s) => Date.parse(s + 'T00:00:00Z') / 86400000;
 
@@ -11,9 +13,10 @@ export default function ProjectDetail() {
   const { user, run } = useApp();
   const [p, reload] = useData(`/projects/${id}`);
   const [tab, setTab] = useState('overview');
+  const [editTimeline, setEditTimeline] = useState(false);
   if (!p) return null;
   const isAdmin = user.role === 'admin';
-  const tabs = [['overview', 'ภาพรวม'], ['tasks', `งาน (${p.tasks_done}/${p.tasks_total})`], ['team', 'ทีมและสัดส่วนงาน']];
+  const tabs = [['overview', 'ภาพรวม'], ['calendar', 'ปฏิทินแผนงาน'], ['tasks', `งาน (${p.tasks_done}/${p.tasks_total})`], ['team', 'ทีมและสัดส่วนงาน']];
   if (p.sharing) tabs.push(['sharing', 'ผลประโยชน์']);
 
   const setStatus = async (status) => {
@@ -31,6 +34,20 @@ export default function ProjectDetail() {
       </PageHead>
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'overview' && <Overview p={p} showMoney={user.role !== 'staff'} />}
+      {tab === 'calendar' && (editTimeline ? (
+        <TimelineEditor p={p} onCancel={() => setEditTimeline(false)} onSaved={() => { setEditTimeline(false); reload(); }} />
+      ) : (
+        <div className="card">
+          <div className="card-head">
+            <p className="small muted">{p.timeline?.items ? 'ปฏิทินที่แก้ไขและบันทึกไว้ของโครงการนี้' : 'สร้างจากงาน วันครบกำหนดชำระ และวันส่งมอบในระบบ — กด “แก้ไขปฏิทิน” เพื่อเพิ่มนัดลูกค้าหรือข้อมูลที่รอจากลูกค้า'}</p>
+            <div className="row">
+              {isAdmin && <button className="btn" onClick={() => setEditTimeline(true)}>แก้ไขปฏิทิน</button>}
+              <a className="btn primary" href={`/print/timeline/${p.id}`} target="_blank" rel="noreferrer"><Icon name="print" />พิมพ์ / ส่งให้ลูกค้า</a>
+            </div>
+          </div>
+          <ProjectTimeline p={p} />
+        </div>
+      ))}
       {tab === 'tasks' && <Tasks p={p} reload={reload} />}
       {tab === 'team' && <Team p={p} reload={reload} isAdmin={isAdmin} />}
       {tab === 'sharing' && p.sharing && <SharingTab p={p} reload={reload} canPay={isAdmin} />}

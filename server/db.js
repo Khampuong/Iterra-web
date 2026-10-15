@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS deals (
   demo_html TEXT, demo_source TEXT,
   demo_url TEXT,                             -- ลิงก์ Demo ที่ admin แนบให้พนักงานขายนำเสนอ
   demo_data TEXT,                            -- JSON ข้อมูลหน้า Demo ที่ทีมพัฒนาแก้ไข
+  quote_note TEXT,                           -- หมายเหตุ / เงื่อนไขเพิ่มเติมที่แสดงในใบเสนอราคา
   step TEXT,                                 -- ขั้นตอนงานขายปัจจุบัน (รหัสจาก settings.sales_steps)
   duration_days INTEGER NOT NULL DEFAULT 0,  -- วันทำการ
   discount REAL NOT NULL DEFAULT 0,
@@ -117,6 +118,30 @@ CREATE TABLE IF NOT EXISTS transactions (
   document_id INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS timeline_items (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  sort INTEGER NOT NULL DEFAULT 0,
+  start TEXT NOT NULL,
+  end TEXT NOT NULL,
+  type TEXT NOT NULL,            -- req | meet | dev | ops | server | test | perf | ship | mon
+  text TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deal_extras (
+  id INTEGER PRIMARY KEY,
+  deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  no INTEGER NOT NULL,                       -- งานเพิ่มเติมลำดับที่ของงานขายนี้
+  title TEXT NOT NULL,
+  items TEXT NOT NULL DEFAULT '[]',          -- JSON [{ title, description, effort, price_override }]
+  discount REAL NOT NULL DEFAULT 0,
+  duration_days INTEGER NOT NULL DEFAULT 1,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',      -- draft | quoted | approved | rejected
+  quote_id INTEGER, invoice_id INTEGER,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  approved_at TEXT
+);
 CREATE TABLE IF NOT EXISTS deal_messages (
   id INTEGER PRIMARY KEY,
   deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
@@ -140,6 +165,11 @@ if (!db.prepare('PRAGMA table_info(projects)').all().some((c) => c.name === 'sal
   db.exec('ALTER TABLE projects ADD COLUMN sales_percent REAL');
 }
 
+// คำนำและหมายเหตุของปฏิทินแผนงานรายโครงการ
+for (const col of ['timeline_intro', 'timeline_note', 'timeline_title']) {
+  if (!db.prepare('PRAGMA table_info(projects)').all().some((c) => c.name === col)) db.exec(`ALTER TABLE projects ADD COLUMN ${col} TEXT`);
+}
+
 // ฐานข้อมูลที่สร้างก่อนมีขั้นตอนงานขายแบบแก้ไขได้: เพิ่มคอลัมน์ให้
 if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'step')) {
   db.exec('ALTER TABLE deals ADD COLUMN step TEXT');
@@ -148,6 +178,22 @@ if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'step')
 // dev ที่ผู้ถือหุ้นเลือกให้รับงานขายนี้
 if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'dev_id')) {
   db.exec('ALTER TABLE deals ADD COLUMN dev_id INTEGER REFERENCES users(id)');
+}
+
+// ราคาตั้งต้นของงานขาย (ก่อน VAT) ใช้คุมเพดานส่วนลดของพนักงานขาย
+// ตั้งเมื่อวิเคราะห์ Requirement และเมื่อ admin/ผู้ถือหุ้นปรับราคา
+// เวลาที่ dev กดรับงาน (ว่าง = ยังไม่กดรับ / เพิ่งถูกเลือก)
+if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'dev_accepted_at')) {
+  db.exec('ALTER TABLE deals ADD COLUMN dev_accepted_at TEXT');
+}
+
+if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'price_base')) {
+  db.exec('ALTER TABLE deals ADD COLUMN price_base REAL');
+}
+
+// หมายเหตุในใบเสนอราคา
+if (!db.prepare('PRAGMA table_info(deals)').all().some((c) => c.name === 'quote_note')) {
+  db.exec('ALTER TABLE deals ADD COLUMN quote_note TEXT');
 }
 
 // ฐานข้อมูลที่สร้างก่อนมีข้อมูลหน้า Demo ของทีมพัฒนา: เพิ่มคอลัมน์ให้
@@ -208,7 +254,8 @@ export const DEFAULT_SETTINGS = {
     signer: '',
   },
   rates: Object.fromEntries(POSITIONS.map((p) => [p.code, p.rate])),
-  pricing: { margin_percent: 35, vat_percent: 7, quote_valid_days: 30 },
+  // max_sales_discount_percent: พนักงานขายลดราคาได้ไม่เกินกี่ % จากราคาตั้งต้น
+  pricing: { margin_percent: 35, vat_percent: 7, quote_valid_days: 30, max_sales_discount_percent: 10 },
   payment_terms: [
     { label: 'งวดที่ 1 มัดจำเมื่อลงนามสัญญา', percent: 50 },
     { label: 'งวดที่ 2 เมื่อส่งมอบและตรวจรับงาน', percent: 50 },

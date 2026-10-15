@@ -167,7 +167,16 @@ router.get('/:id', requireAuth, (req, res) => {
       days: list.reduce((s, t) => s + t.weight, 0),
     };
   }).filter(Boolean);
-  const out = { ...forRole(req.user, projectSummary(p)), tasks, roles, phases };
+  // วันครบกำหนดชำระแต่ละงวด ใช้แสดงในปฏิทินแผนงาน (ไม่ส่งยอดเงิน)
+  const milestones = p.deal_id
+    ? q.all("SELECT number, due_at, status, data FROM documents WHERE deal_id = ? AND type = 'invoice' AND status != 'void' ORDER BY due_at", p.deal_id)
+      .filter((inv) => inv.due_at)
+      .map((inv) => ({ title: `ครบกำหนดชำระ ${JSON.parse(inv.data).installment?.label ?? inv.number}`, date: inv.due_at, status: inv.status }))
+    : [];
+  // ปฏิทินแผนงาน: items = null แปลว่ายังไม่เคยบันทึก (หน้าเว็บจะสร้างจากงานในระบบให้)
+  const items = q.all('SELECT start, end, type, text FROM timeline_items WHERE project_id = ? ORDER BY start, sort, id', p.id);
+  const timeline = { title: p.timeline_title ?? '', intro: p.timeline_intro ?? '', note: p.timeline_note ?? '', items: items.length ? items : null };
+  const out = { ...forRole(req.user, projectSummary(p)), tasks, roles, phases, milestones, timeline };
   if (seesAll(req.user)) out.sharing = computeSharing(p);
   // พนักงานขายของโครงการ แสดงในตารางทีม (เปอร์เซ็นต์เห็นเฉพาะผู้ที่ดูผลประโยชน์ได้)
   const seller = p.deal_id ? q.get('SELECT u.name FROM deals d JOIN users u ON u.id = d.sales_id WHERE d.id = ?', p.deal_id) : null;
@@ -214,6 +223,33 @@ router.put('/:id/roles', admin, (req, res) => {
     }
   });
   res.json({ ok: true });
+});
+
+// บันทึกปฏิทินแผนงานของโครงการ (แทนที่ทั้งชุด) · ส่ง items ว่างเพื่อกลับไปใช้รายการที่สร้างจากงานในระบบ
+const TL_TYPES = ['req', 'meet', 'dev', 'ops', 'server', 'test', 'perf', 'ship', 'mon'];
+const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+router.put('/:id/timeline', admin, (req, res) => {
+  const p = findProject(req, res);
+  if (!p) return;
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (items.length > 300) return res.status(400).json({ error: 'รายการในปฏิทินมากเกินไป (สูงสุด 300)' });
+  const clean = [];
+  for (const it of items) {
+    const text = String(it?.text || '').trim().slice(0, 120);
+    if (!text) continue; // แถวที่ไม่มีข้อความไม่บันทึก
+    if (!isDate(it.start) || !isDate(it.end)) return res.status(400).json({ error: `กรุณาใส่วันเริ่มและวันสิ้นสุดของ “${text}”` });
+    if (it.end < it.start) return res.status(400).json({ error: `วันสิ้นสุดของ “${text}” อยู่ก่อนวันเริ่ม` });
+    clean.push({ start: it.start, end: it.end, type: TL_TYPES.includes(it.type) ? it.type : 'dev', text });
+  }
+  tx(() => {
+    q.run('DELETE FROM timeline_items WHERE project_id = ?', p.id);
+    clean.forEach((it, i) => q.run('INSERT INTO timeline_items (project_id, sort, start, end, type, text) VALUES (?, ?, ?, ?, ?, ?)', p.id, i, it.start, it.end, it.type, it.text));
+    q.run(
+      'UPDATE projects SET timeline_title = ?, timeline_intro = ?, timeline_note = ? WHERE id = ?',
+      String(req.body?.title || '').trim().slice(0, 120), String(req.body?.intro || '').trim().slice(0, 600), String(req.body?.note || '').trim().slice(0, 2000), p.id,
+    );
+  });
+  res.json({ ok: true, count: clean.length });
 });
 
 router.post('/:id/tasks', admin, (req, res) => {

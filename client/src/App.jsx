@@ -13,6 +13,8 @@ import Finance from './pages/Finance.jsx';
 import Settings, { Members } from './pages/Settings.jsx';
 import DemoEditor, { Demos } from './pages/Demos.jsx';
 import PrintDoc from './pages/PrintDoc.jsx';
+import TimelinePrint from './pages/TimelinePrint.jsx';
+import NotificationsPage from './pages/Notifications.jsx';
 
 export default function App() {
   const { user, meta } = useApp();
@@ -25,6 +27,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/print/:id" element={<PrintDoc />} />
+      <Route path="/print/timeline/:id" element={only(PROJECTS, <TimelinePrint />)} />
       <Route element={<Layout />}>
         <Route index element={only([...WIDE, 'staff'], <Dashboard />)} />
         <Route path="deals" element={<Deals />} />
@@ -35,6 +38,7 @@ export default function App() {
         <Route path="finance" element={only(WIDE, <Finance />)} />
         <Route path="demos" element={canEditDemo(user) ? <Demos /> : <Navigate to={home} replace />} />
         <Route path="demos/:id" element={canEditDemo(user) ? <DemoEditor /> : <Navigate to={home} replace />} />
+        <Route path="notifications" element={<NotificationsPage />} />
         <Route path="members" element={only(['admin'], <Members />)} />
         <Route path="settings" element={only(['admin'], <Settings />)} />
         <Route path="*" element={<Navigate to={home} replace />} />
