@@ -66,7 +66,7 @@ export function requireAuth(req, res, next) {
 
 // ผู้ถือหุ้นและกรรมการ: ดูข้อมูลได้ทั้งหมดแต่แก้ไขไม่ได้ · admin: ดูและแก้ไขได้ทั้งหมด
 export const WIDE_ROLES = ['admin', 'shareholder', 'director'];
-export const SELL_ROLES = ['admin', 'sales', 'staff'];
+export const SELL_ROLES = ['admin', 'shareholder', 'sales', 'staff']; // ผู้ถือหุ้นขายงานได้ด้วย
 export const PROJECT_ROLES = ['admin', 'shareholder', 'director', 'staff']; // ฝ่ายขายดูโครงการไม่ได้
 // ทีมพัฒนา (dev) = สมาชิกสิทธิ์พนักงานทุกตำแหน่ง — แก้ไขข้อมูลหน้า Demo ได้ เช่นเดียวกับ admin
 export const canEditDemo = (user) => user.role === 'admin' || user.role === 'staff';

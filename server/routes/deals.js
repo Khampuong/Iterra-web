@@ -161,7 +161,7 @@ function snapshot(deal, settings) {
     items: items.map((i) => ({ title: i.title, description: i.description, days: i.days, price: i.price })),
     totals,
     payment_terms: settings.payment_terms,
-    sales: q.get('SELECT name, email FROM users WHERE id = ?', deal.sales_id) ?? null,
+    sales: q.get('SELECT name, email, phone FROM users WHERE id = ?', deal.sales_id) ?? null,
     quote_note: String(deal.quote_note || '').trim(),
     phase2: phase2Items(deal, items),
   };
@@ -496,7 +496,13 @@ documents.get('/:id', view, (req, res) => {
   const deal = q.get('SELECT * FROM deals WHERE id = ?', doc.deal_id);
   if (!canSee(req.user, deal)) return res.status(403).json({ error: 'ไม่มีสิทธิ์ดูเอกสารนี้' });
   const ref = doc.ref_id ? q.get('SELECT number FROM documents WHERE id = ?', doc.ref_id) : null;
-  res.json({ ...doc, data: JSON.parse(doc.data), ref_number: ref?.number ?? null });
+  // เอกสารเก่าที่ออกก่อนกรอกที่อยู่/เบอร์บริษัท: เติมเฉพาะช่องที่ว่างจากข้อมูลบริษัทปัจจุบัน
+  const data = JSON.parse(doc.data);
+  if (data.company) {
+    const now = getSettings().company;
+    for (const k of ['address', 'phone', 'email', 'tax_id']) if (!data.company[k] && now[k]) data.company[k] = now[k];
+  }
+  res.json({ ...doc, data, ref_number: ref?.number ?? null });
 });
 
 // รับชำระใบแจ้งหนี้ -> ออกใบเสร็จรับเงิน + บันทึกรายรับ (ยอดก่อน VAT)

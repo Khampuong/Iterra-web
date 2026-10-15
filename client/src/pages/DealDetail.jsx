@@ -24,7 +24,7 @@ export default function DealDetail() {
   if (!deal) return null;
 
   const isAdmin = user.role === 'admin';
-  const canSell = SELL.includes(user.role); // ผู้ถือหุ้น/กรรมการดูได้อย่างเดียว
+  const canSell = SELL.includes(user.role); // กรรมการดูได้อย่างเดียว
   // ปรับรายการและราคาเพื่อต่อรองกับลูกค้า: admin ผู้ถือหุ้น และพนักงานขายเจ้าของงาน
   const canPrice = isAdmin || user.role === 'shareholder' || (canSell && deal.sales_id === user.id);
   const closed = deal.status === 'won' || deal.status === 'lost';

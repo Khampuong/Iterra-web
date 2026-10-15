@@ -247,7 +247,7 @@ export const DEFAULT_SETTINGS = {
   company: {
     name: 'Iterra Co., Ltd.',
     name_th: 'บริษัท อิเทอร์ร่า จำกัด',
-    address: '',
+    address: '180/75 ต.บางศรีเมือง อ.เมือง จ.นนทบุรี',
     tax_id: '',
     phone: '',
     email: '',

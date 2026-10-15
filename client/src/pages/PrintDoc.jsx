@@ -52,8 +52,9 @@ export default function PrintDoc() {
           <div className="co">
             <b>{co.name_th || co.name}</b>
             {co.name_th && co.name && <div>{co.name}</div>}
-            <div className="small">{co.address}</div>
-            <div className="small">{[co.tax_id && `เลขประจำตัวผู้เสียภาษี ${co.tax_id}`, co.phone && `โทร ${co.phone}`, co.email].filter(Boolean).join(' · ')}</div>
+            {co.address && <div className="small">ที่อยู่ {co.address}</div>}
+            {(co.phone || co.email) && <div className="small">{[co.phone && `โทร ${co.phone}`, co.email && `อีเมล ${co.email}`].filter(Boolean).join(' · ')}</div>}
+            {co.tax_id && <div className="small">เลขประจำตัวผู้เสียภาษี {co.tax_id}</div>}
           </div>
           <div className="meta">
             <h1>{DOC_TYPE[doc.type]}</h1>
@@ -81,7 +82,7 @@ export default function PrintDoc() {
                 <b>{d.deal.title}</b>
                 {d.extra && <div><b>งานเพิ่มเติม #{d.extra.no}: {d.extra.title}</b>{d.extra.contract && ` · ตามสัญญา ${d.extra.contract}`}</div>}
                 <div>อ้างอิง {d.deal.code} · ระยะเวลา {d.deal.duration_days} วันทำการ</div>
-                {d.sales && <div className="small">ผู้เสนอราคา {d.sales.name} · {d.sales.email}</div>}
+                {d.sales && <div className="small">ผู้เสนอราคา {[d.sales.name, d.sales.phone && `โทร ${d.sales.phone}`, d.sales.email].filter(Boolean).join(' · ')}</div>}
               </div>
             </div>
 

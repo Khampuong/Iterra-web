@@ -141,7 +141,7 @@ function snapshot(deal, ex, settings) {
     items: p.items.map((i) => ({ title: i.title, description: i.description, days: i.days, price: i.price })),
     totals: p.totals,
     payment_terms: [{ label: 'ชำระเต็มจำนวนเมื่อลูกค้าอนุมัติงานเพิ่มเติม', percent: 100 }],
-    sales: q.get('SELECT name, email FROM users WHERE id = ?', deal.sales_id) ?? null,
+    sales: q.get('SELECT name, email, phone FROM users WHERE id = ?', deal.sales_id) ?? null,
     quote_note: String(ex.note || '').trim(),
   };
 }
