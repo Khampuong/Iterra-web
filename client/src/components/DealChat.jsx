@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ROLE_LABEL } from '../lib.js';
 import { useApp } from './ui.jsx';
 
+// แสดงลิงก์ในข้อความให้คลิกเปิดได้ (เช่น ลิงก์ Demo ที่ dev ส่ง)
+const URL_RE = /(https?:\/\/[^\s]+)/g;
+const linkify = (text) => text.split(URL_RE).map((part, i) => (i % 2 ? <a key={i} href={part} target="_blank" rel="noopener noreferrer">{part}</a> : part));
+
 // ห้องคุยงานของงานขาย ระหว่างพนักงานขายกับ dev (ผู้ถือหุ้น กรรมการ และ admin ร่วมอ่านและตอบได้)
 export default function DealChat({ dealId, hint }) {
   const { run } = useApp();
@@ -41,7 +45,7 @@ export default function DealChat({ dealId, hint }) {
             <div className="small muted">
               {m.mine ? 'คุณ' : `${m.user_name} · ${ROLE_LABEL[m.user_role] ?? m.user_role}`} · {new Date(m.created_at.replace(' ', 'T') + 'Z').toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
             </div>
-            <div className="bubble">{m.body}</div>
+            <div className="bubble">{linkify(m.body)}</div>
           </div>
         ))}
       </div>

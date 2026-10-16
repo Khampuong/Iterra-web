@@ -10,6 +10,7 @@ import projectRoutes from './routes/projects.js';
 import financeRoutes from './routes/finance.js';
 import demoRoutes from './routes/demos.js';
 import teamRoutes from './routes/teamwork.js';
+import extraRoutes from './routes/extras.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, '..', 'dist');
@@ -39,6 +40,7 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api', adminRoutes);
 app.use('/api/deals', teamRoutes); // ต้องมาก่อน dealRoutes เพราะมีเส้นทาง /dev-candidates
+app.use('/api/deals', extraRoutes); // งานเพิ่มเติมหลังปิดการขาย
 app.use('/api/deals', dealRoutes);
 app.use('/api/documents', documents);
 app.use('/api/projects', projectRoutes);

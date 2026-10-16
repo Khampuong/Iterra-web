@@ -57,7 +57,9 @@ export function feasibility(deal, totals, settings) {
   const tech = clamp(analysis?.technical_score ?? 70);
   factors.push({
     key: 'technical', label: 'ความเป็นไปได้ทางเทคนิค', weight: 40, score: tech,
-    note: analysis ? 'จากผลวิเคราะห์ Requirement' : 'ยังไม่ได้วิเคราะห์ ใช้ค่ากลาง',
+    note: analysis?.dev_review
+      ? `dev ${analysis.dev_review.by} ปรับจาก ${analysis.dev_review.before} เป็น ${analysis.dev_review.score}${analysis.dev_review.note ? ` — ${analysis.dev_review.note}` : ''}`
+      : analysis ? 'จากผลวิเคราะห์ Requirement' : 'ยังไม่ได้วิเคราะห์ ใช้ค่ากลาง',
   });
 
   if (deal.deadline && deal.duration_days > 0) {
@@ -137,6 +139,9 @@ export function parseChecks(deal) {
   }
 }
 
+// ส่วนเสริมที่เลื่อนไปเฟส 2 ได้ก่อนเมื่อเกินงบ
+const OPTIONAL_MODULES = ['service', 'chat', 'notify', 'dashboard', 'mobile'];
+
 const RISK_WORDS = [
   [/ai|machine learning|ปัญญาประดิษฐ์|blockchain|เรียลไทม์|real-?time/i, 'มีส่วนที่ใช้เทคโนโลยีเฉพาะทาง ควรทำ Proof of Concept ก่อนยืนยันราคา'],
   [/ด่วน|เร่ง|ภายในสัปดาห์|asap/i, 'ลูกค้าต้องการงานเร่งด่วน ควรตกลงขอบเขตงานงวดแรกให้ชัด'],
@@ -146,32 +151,34 @@ const RISK_WORDS = [
 export function fallbackAnalyze(deal) {
   const text = `${deal.title}\n${deal.project_type || ''}\n${deal.requirement}`;
   const checks = parseChecks(deal);
-  let modules = CATALOG.filter((m) => checks.includes(m.id) || m.k.test(text)).map(({ title, desc, effort }) => ({
+  // ลูกค้าติ๊กเอง = should, จับได้จากคำสำคัญอย่างเดียว/บริการเสริม = could (เลื่อนไปเฟส 2 ได้ก่อนเมื่อเกินงบ)
+  let modules = CATALOG.filter((m) => checks.includes(m.id) || m.k.test(text)).map(({ id, title, desc, effort }) => ({
     title, description: desc, effort: { ...effort },
+    priority: checks.includes(id) && !OPTIONAL_MODULES.includes(id) ? 'should' : 'could',
   }));
   // รายการที่ admin เพิ่มเอง: ใช้เมื่อถูกติ๊กเท่านั้น (ไม่มีการจับคำสำคัญ)
   for (const m of getSettings().requirement_items) {
-    if (checks.includes(m.id)) modules.push({ title: m.title, description: m.desc, effort: { ...m.effort } });
+    if (checks.includes(m.id)) modules.push({ title: m.title, description: m.desc, effort: { ...m.effort }, priority: 'should' });
   }
 
   if (modules.length === 0) {
     // ไม่พบคำสำคัญ: ใช้แต่ละบรรทัดของ requirement เป็นรายการงาน
     modules = deal.requirement
       .split(/\r?\n/).map((l) => l.replace(/^[\s\-*•\d.)]+/, '').trim()).filter((l) => l.length > 3).slice(0, 12)
-      .map((l) => ({ title: l.slice(0, 80), description: l, effort: { FE: 2, BE: 3, QA: 1 } }));
+      .map((l) => ({ title: l.slice(0, 80), description: l, effort: { FE: 2, BE: 3, QA: 1 }, priority: 'should' }));
   }
   if (modules.length === 0) {
-    modules = [{ title: deal.title, description: 'ขอบเขตงานตามที่ตกลงกับลูกค้า', effort: { FE: 3, BE: 4, QA: 1 } }];
+    modules = [{ title: deal.title, description: 'ขอบเขตงานตามที่ตกลงกับลูกค้า', effort: { FE: 3, BE: 4, QA: 1 }, priority: 'must' }];
   }
 
   const dev = modules.reduce((s, m) => s + Object.values(m.effort).reduce((a, b) => a + b, 0), 0);
   const scale = (ratio, min) => Math.max(min, Math.round(dev * ratio * 2) / 2);
   const items = [
-    { title: 'เก็บ Requirement และวางแผนโครงการ', description: 'สัมภาษณ์ผู้ใช้ สรุปขอบเขต แผนงาน และเกณฑ์ตรวจรับ', effort: { PM: scale(0.06, 1), BA: scale(0.08, 1) } },
-    { title: 'วิเคราะห์และออกแบบระบบ', description: 'ออกแบบขั้นตอนทำงาน โครงสร้างข้อมูล และสถาปัตยกรรม', effort: { SA: scale(0.08, 1), ARCH: scale(0.03, 0.5) } },
+    { title: 'เก็บ Requirement และวางแผนโครงการ', description: 'สัมภาษณ์ผู้ใช้ สรุปขอบเขต แผนงาน และเกณฑ์ตรวจรับ', effort: { PM: scale(0.06, 1), BA: scale(0.08, 1) }, priority: 'must' },
+    { title: 'วิเคราะห์และออกแบบระบบ', description: 'ออกแบบขั้นตอนทำงาน โครงสร้างข้อมูล และสถาปัตยกรรม', effort: { SA: scale(0.08, 1), ARCH: scale(0.03, 0.5) }, priority: 'must' },
     ...modules,
-    { title: 'ทดสอบระบบและ UAT', description: 'ทดสอบรวม Regression และช่วยผู้ใช้ตรวจรับ', effort: { QA: scale(0.08, 1), PM: scale(0.02, 0.5) } },
-    { title: 'นำขึ้นใช้งานและส่งมอบ', description: 'เตรียม Environment นำขึ้นระบบจริง อบรมการใช้งาน และรับประกัน', effort: { DEVOPS: scale(0.04, 1), SUPPORT: scale(0.03, 1) } },
+    { title: 'ทดสอบระบบและ UAT', description: 'ทดสอบรวม Regression และช่วยผู้ใช้ตรวจรับ', effort: { QA: scale(0.08, 1), PM: scale(0.02, 0.5) }, priority: 'must' },
+    { title: 'นำขึ้นใช้งานและส่งมอบ', description: 'เตรียม Environment นำขึ้นระบบจริง อบรมการใช้งาน และรับประกัน', effort: { DEVOPS: scale(0.04, 1), SUPPORT: scale(0.03, 1) }, priority: 'must' },
   ];
 
   const risks = RISK_WORDS.filter(([re]) => re.test(text)).map(([, msg]) => msg);
@@ -189,3 +196,68 @@ export function fallbackAnalyze(deal) {
 }
 
 export { positionByCode };
+
+// ---------- ปรับขอบเขตให้พอดีงบลูกค้า ----------
+// priority ของรายการ: must = ต้องมี (ตัดไม่ได้), should = สำคัญ, could = เลื่อนไปเฟส 2 ได้ก่อน
+const PRIORITY_RANK = { could: 0, should: 1, must: 2 };
+const MAX_TRIM = 0.2; // ลดกำลังคนได้ไม่เกิน 20% ต่อรายการ (ทำแบบกระชับ เช่น ใช้ดีไซน์มาตรฐาน ลดรอบแก้ไข)
+
+const netOf = (items, settings) => dealTotals(items.map((i) => priceItem(i, settings)), { discount: 0 }, settings).net;
+
+function trimItems(items, factor) {
+  return items.map((it) => ({
+    ...it,
+    effort: Object.fromEntries(Object.entries(it.effort).map(([c, d]) => [c, d <= 0.5 ? d : Math.max(0.5, Math.round(d * factor * 2) / 2)])),
+  }));
+}
+
+// ลดขอบเขตจนราคาก่อน VAT ไม่เกินงบ: เลื่อนรายการที่สำคัญน้อยไปเฟส 2 ก่อน แล้วค่อยลดกำลังคนส่วนที่เหลือ
+// ราคายังคำนวณจากอัตราค่าแรง + กำไรตามตั้งค่า จึงไม่ต่ำกว่าต้นทุน
+export function fitToBudget(items, budget, settings) {
+  const original = netOf(items, settings);
+  if (!(budget > 0)) return { items, fit: null };
+  const base = { budget, original_net: original };
+  if (original <= budget) return { items, fit: { ...base, status: 'within', fitted_net: original, trim_percent: 0, deferred: [] } };
+
+  let keep = items.map((it, n) => ({ ...it, _n: n }));
+  const deferred = [];
+  const minNet = (list) => netOf(trimItems(list, 1 - MAX_TRIM), settings);
+  // เลื่อนรายการไปเฟส 2 จนกว่าการลดกำลังคนจะพอปิดส่วนต่างได้
+  while (minNet(keep) > budget) {
+    const pool = keep.filter((it) => (it.priority ?? 'should') !== 'must');
+    if (!pool.length) break;
+    const rank = Math.min(...pool.map((it) => PRIORITY_RANK[it.priority ?? 'should']));
+    const tier = pool.filter((it) => PRIORITY_RANK[it.priority ?? 'should'] === rank);
+    const gap = minNet(keep) - budget;
+    const price = (it) => priceItem(it, settings).price;
+    // ในกลุ่มเดียวกัน: เลือกรายการเล็กสุดที่ตัดแล้วพอดีงบ ถ้าไม่มีให้ตัดรายการใหญ่สุด
+    const enough = tier.filter((it) => price(it) * (1 - MAX_TRIM) >= gap).sort((a, b) => price(a) - price(b));
+    const pick = enough[0] ?? tier.sort((a, b) => price(b) - price(a))[0];
+    keep = keep.filter((it) => it !== pick);
+    deferred.push(pick);
+  }
+  // ตัดเกินไป: เติมรายการที่เลื่อนไว้กลับเข้าขอบเขต (สำคัญก่อน) ถ้ายังพอดีงบ
+  for (const it of [...deferred].sort((a, b) => PRIORITY_RANK[b.priority ?? 'should'] - PRIORITY_RANK[a.priority ?? 'should'] || a._n - b._n)) {
+    const next = [...keep, it].sort((a, b) => a._n - b._n);
+    if (minNet(next) <= budget) { keep = next; deferred.splice(deferred.indexOf(it), 1); }
+  }
+  // ลดกำลังคนเท่าที่จำเป็น (ทีละ 1%) ไม่เกิน MAX_TRIM
+  let factor = 1;
+  let fitted = keep;
+  while (netOf(fitted, settings) > budget && factor > 1 - MAX_TRIM + 1e-9) {
+    factor = Math.round((factor - 0.01) * 100) / 100;
+    fitted = trimItems(keep, factor);
+  }
+  const fittedNet = netOf(fitted, settings);
+  const clean = ({ _n, ...it }) => it;
+  return {
+    items: fitted.map(clean),
+    fit: {
+      ...base,
+      status: fittedNet <= budget ? 'fitted' : 'over',
+      fitted_net: fittedNet,
+      trim_percent: Math.round((1 - factor) * 100),
+      deferred: deferred.sort((a, b) => a._n - b._n).map((it) => ({ ...clean(it), price: priceItem(it, settings).price })),
+    },
+  };
+}

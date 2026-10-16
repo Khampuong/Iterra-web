@@ -55,7 +55,7 @@ function Pricing({ settings, save }) {
   return (
     <div className="stack">
       <NumberForm title="การตั้งราคา" hint="ราคาเสนอ = ต้นทุนค่าแรง × (1 + กำไรขั้นต้น)" value={settings.pricing} onSave={(v) => save('pricing', v)}
-        fields={[['margin_percent', 'กำไรขั้นต้นบวกเพิ่ม (%)'], ['vat_percent', 'VAT (%)'], ['quote_valid_days', 'ยืนราคาใบเสนอราคา (วัน)']]} />
+        fields={[['margin_percent', 'กำไรขั้นต้นบวกเพิ่ม (%)'], ['vat_percent', 'VAT (%)'], ['quote_valid_days', 'ยืนราคาใบเสนอราคา (วัน)'], ['max_sales_discount_percent', 'พนักงานขายลดราคาได้ไม่เกิน (%)']]} />
       <NumberForm title="กำลังการผลิตของทีม" hint="ใช้ประเมินระยะเวลาและความเป็นไปได้ก่อนรับงาน" value={settings.capacity} onSave={(v) => save('capacity', v)}
         fields={[['max_active_projects', 'รับโครงการพร้อมกันได้สูงสุด'], ['parallel_people', 'จำนวนคนทำงานขนานกันต่อโครงการ'], ['buffer_percent', 'เผื่อเวลา (%)']]} />
       <div className="card stack">

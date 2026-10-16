@@ -74,7 +74,7 @@ export const DOC_TYPE = { quotation: 'ใบเสนอราคา', contract:
 export const ROLE_LABEL = { admin: 'ผู้ดูแลระบบ', shareholder: 'ผู้ถือหุ้น', director: 'กรรมการ', sales: 'พนักงานขาย', staff: 'พนักงาน' };
 // สิทธิ์ตามบทบาท (ต้องตรงกับ server/auth.js)
 export const WIDE = ['admin', 'shareholder', 'director']; // ดูได้ทั้งหมด
-export const SELL = ['admin', 'sales', 'staff']; // ขายงานได้
+export const SELL = ['admin', 'shareholder', 'sales', 'staff']; // ขายงานได้ (ต้องตรงกับ server/auth.js)
 export const PROJECTS = ['admin', 'shareholder', 'director', 'staff']; // ดูโครงการได้ (ฝ่ายขายดูไม่ได้)
 export const ALL_ROLES = Object.keys(ROLE_LABEL);
 // ทีมพัฒนา (dev) = สมาชิกสิทธิ์พนักงานทุกตำแหน่ง และ admin แก้ไขหน้า Demo ได้ (ต้องตรงกับ server/auth.js)

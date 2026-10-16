@@ -54,7 +54,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   padding: 28px 16px 20px; display: flex; flex-direction: column; gap: 4px;
   position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto;
 }
-.menu-btn, .menu-close, .top-brand, .side-back { display: none; }
+/* ปุ่มเมนูมือถือ: ระบุ .btn ด้วยเพื่อให้ชนะกฎ .btn ที่อยู่ท้ายไฟล์ */
+.btn.menu-btn, .btn.menu-close, .top-brand, .side-back { display: none; }
 .brand { padding: 0 12px 24px; }
 .brand img { display: block; width: 136px; height: auto; }
 .nav-label { font-size: 11px; letter-spacing: 0.1em; color: var(--muted); padding: 14px 12px 6px; text-transform: uppercase; }
@@ -252,6 +253,73 @@ button.step:disabled { cursor: default; color: inherit; }
 .demo-full .demo-frame { flex: 1; height: auto; border: 0; border-radius: 0; }
 .demo-full .demo-bar { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
 
+/* ---------- ปฏิทินแผนงาน: ค่าเดียวกับไฟล์ iterra-client-timeline.html ทุกค่า (จำกัดไว้ใต้ .tl) ---------- */
+.tl { --paper: #faf9f7; --tl-ink: #1c1917; --warm-100: #f5f4f1; --warm-300: #d6d3cc; --warm-500: #78716c; --stone-600: #57534e;
+  color: var(--tl-ink); font-family: Inter, 'Noto Sans Thai', system-ui, sans-serif; font-weight: 300; line-height: 1.6; }
+.tl .label { margin: 0 0 14px; font-size: 11px; font-weight: 400; letter-spacing: 0.22em; text-transform: uppercase; color: var(--warm-500); }
+.tl h1 { margin: 0; font-size: 40px; font-weight: 200; letter-spacing: 0.025em; line-height: 1.2; }
+.tl h2 { margin: 0 0 16px; font-size: 26px; font-weight: 200; letter-spacing: 0.025em; }
+.tl .intro { max-width: 40rem; margin: 14px 0 0; font-size: 14px; color: var(--stone-600); }
+.tl .key { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 32px 0 0; padding: 16px 0; border-top: 1px solid var(--tl-ink); border-bottom: 1px solid var(--warm-300); list-style: none; }
+.tl .key li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.tl .key i { display: inline-block; width: 28px; height: 14px; border-left: 3px solid; }
+/* ประเภทงาน: พื้นอ่อน + ขอบซ้ายสีเข้ม + ตัวหนังสือเข้ม · นัดและส่งมอบใช้พื้นทึบ */
+.tl .req, .tl-type.req       { background: #fbeed3; border-color: #a86a00; color: #5c3a00; }
+.tl .ops, .tl-type.ops       { background: #e3eef6; border-color: #2f6690; color: #163a55; }
+.tl .dev, .tl-type.dev       { background: #e7e5e4; border-color: #57534e; color: #1c1917; }
+.tl .test, .tl-type.test     { background: #ede4f7; border-color: #6b46a3; color: #3b2466; }
+.tl .perf, .tl-type.perf     { background: #f9e1ec; border-color: #99355a; color: #5c1a35; }
+.tl .server, .tl-type.server { background: #dcf0ea; border-color: #0f6e56; color: #084034; }
+.tl .meet, .tl-type.meet     { background: #1c1917; border-color: #1c1917; color: #faf9f7; }
+.tl .mon, .tl-type.mon       { background: #eceae6; border-color: #78716c; color: #44403c; }
+.tl .ship, .tl-type.ship     { background: #9f2d20; border-color: #9f2d20; color: #faf9f7; }
+.tl-type { border-left: 4px solid; }
+.tl section.month { margin-top: 48px; break-inside: avoid-page; }
+.tl .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--tl-ink); border-left: 1px solid var(--warm-300); }
+.tl .dow { padding: 8px; font-size: 11px; font-weight: 400; color: var(--stone-600); border-right: 1px solid var(--warm-300); border-bottom: 1px solid var(--tl-ink); }
+.tl .dow.sat { color: var(--tl-ink); }
+.tl .day { min-height: 128px; padding: 6px; border-right: 1px solid var(--warm-300); border-bottom: 1px solid var(--warm-300); min-width: 0; }
+.tl .day.out { background: var(--warm-100); }
+.tl .day.out .num { color: var(--warm-500); }
+.tl .day.sat { background: #f1efeb; }
+.tl .num { font-size: 12px; font-weight: 400; margin-bottom: 4px; }
+.tl .day.today .num::after { content: 'วันนี้'; margin-left: 6px; font-size: 10px; color: var(--stone-600); }
+.tl .ev { display: block; margin-top: 3px; padding: 2px 6px; border-left: 3px solid; font-size: 11px; font-weight: 400; line-height: 1.35; overflow-wrap: anywhere; }
+/* จอแคบ: ปฏิทิน 7 ช่องอ่านไม่ได้ จึงสลับเป็นรายการตามวัน */
+.tl .agenda { display: none; list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--tl-ink); }
+.tl .agenda li { display: grid; grid-template-columns: 5.5rem 1fr; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--warm-300); }
+.tl .agenda .d { font-size: 13px; font-weight: 400; }
+.tl .agenda .d small { display: block; font-weight: 300; color: var(--stone-600); }
+.tl .needs { margin-top: 56px; }
+.tl .needs ul { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--tl-ink); }
+.tl .needs li { display: grid; grid-template-columns: 9rem 1fr; gap: 12px; padding: 10px 0; font-size: 14px; border-bottom: 1px solid var(--warm-300); }
+.tl .needs b { font-weight: 400; }
+.tl footer { margin-top: 48px; font-size: 12px; color: var(--stone-600); }
+.tl footer p { margin: 0 0 8px; }
+.tl-page { background: #faf9f7; min-height: 100%; }
+.tl-page main { max-width: 1200px; margin: 0 auto; padding: 24px 24px 96px; }
+.tl-actions { max-width: 1200px; margin: 0 auto; padding: 24px 24px 0; display: flex; justify-content: flex-end; }
+.card .tl { padding: 8px 4px; }
+@media (max-width: 760px) {
+  .tl-page main { padding: 16px 16px 72px; }
+  .tl h1 { font-size: 32px; }
+  .tl .grid { display: none; }
+  .tl .agenda { display: block; }
+  .tl .needs li { grid-template-columns: 1fr; gap: 2px; }
+}
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  .tl-actions { display: none; }
+  .tl-page main { max-width: none; padding: 0; }
+  .tl section.month { break-before: page; margin-top: 0; }
+  .tl .day { min-height: 92px; }
+  /* เครื่องพิมพ์บางรุ่นวัดหน้ากระดาษแคบกว่า 760px จึงบังคับให้พิมพ์เป็นตารางปฏิทินเสมอ */
+  .tl .grid { display: grid !important; }
+  .tl .agenda { display: none !important; }
+  .tl .day.today .num::after { content: none; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
 /* ---------- login ---------- */
 /* การ์ดกลางหน้า มีวงกลมโลโก้ซ้อนอยู่ที่ขอบบน */
 .login { min-height: 100%; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 96px 16px 40px; background: linear-gradient(160deg, #f6f8fb 0%, #e9eef5 100%); }
@@ -281,10 +349,10 @@ button.step:disabled { cursor: default; color: inherit; }
   .side-back { display: block; position: fixed; inset: 0; z-index: 44; background: rgba(13, 27, 52, 0.4); }
   .brand { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 16px 10px; }
   .brand img { width: 112px; }
-  .menu-close { display: inline-flex; }
+  .btn.menu-close { display: inline-flex; }
   .nav-link { padding: 12px; }
   .top { position: sticky; top: 0; z-index: 30; background: var(--bg); padding-top: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
-  .menu-btn { display: inline-flex; padding: 8px; margin-left: -8px; }
+  .btn.menu-btn { display: inline-flex; padding: 8px; margin-left: -8px; }
   .menu-btn svg { width: 22px; height: 22px; }
   .top-brand { display: block; height: 30px; width: auto; margin-right: auto; }
   .page, .top { padding-left: 16px; padding-right: 16px; }
@@ -332,3 +400,17 @@ button.step:disabled { cursor: default; color: inherit; }
 /* จอสัมผัส: ไม่มี hover จึงไม่ต้องเปลี่ยนสีค้าง */
 @media (hover: none) { tbody tr.link:hover { background: none; } }
 @media print { .side, .top, .side-back, .toasts { display: none !important; } .shell { display: block; } }
+
+/* การแจ้งเตือน: ลิงก์ดูทั้งหมดในกล่อง และหน้ารายการทั้งหมด */
+.pop-all { display: block; text-align: center; padding: 10px; margin-top: 6px; border-top: 1px solid var(--line-2); font-weight: 500; }
+.note-list { list-style: none; margin: 0; padding: 0; }
+.note-list li + li { border-top: 1px solid var(--line-2); }
+.note-row { display: flex; gap: 12px; align-items: flex-start; width: 100%; text-align: left; background: none; border: 0; padding: 14px 24px; cursor: pointer; color: var(--ink); font: inherit; }
+.note-row:hover { background: var(--line-2); }
+.note-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; flex: none; background: transparent; }
+.note-row.unread .note-dot { background: var(--accent); }
+.note-row.unread .note-title { font-weight: 600; }
+.note-title, .note-body { display: block; overflow-wrap: anywhere; }
+@media (max-width: 860px) { .note-row { padding: 12px 16px; flex-wrap: wrap; } .note-row > .nowrap { margin-left: 20px; } }
+.chat-msg.mine .bubble a { color: #fff; text-decoration: underline; }
+.bubble a { overflow-wrap: anywhere; }

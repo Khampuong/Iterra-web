@@ -35,17 +35,24 @@ router.put('/:id/dev', assigner, (req, res) => {
   const devId = req.body?.dev_id ? Number(req.body.dev_id) : null;
   const dev = devId ? q.get("SELECT id, name FROM users WHERE id = ? AND role = 'staff' AND active = 1", devId) : null;
   if (devId && !dev) return res.status(400).json({ error: 'ไม่พบ dev ที่เลือก' });
-  q.run('UPDATE deals SET dev_id = ? WHERE id = ?', dev?.id ?? null, deal.id);
+  // เปลี่ยน dev = ต้องรอ dev คนใหม่กดรับงานอีกครั้ง
+  if ((dev?.id ?? null) !== deal.dev_id) q.run('UPDATE deals SET dev_id = ?, dev_accepted_at = NULL WHERE id = ?', dev?.id ?? null, deal.id);
 
   if (dev && dev.id !== deal.dev_id) {
     const seller = q.get('SELECT name FROM users WHERE id = ?', deal.sales_id)?.name ?? '—';
-    notify({ user_id: dev.id, title: `คุณได้รับมอบหมายงาน ${deal.code}`, body: `${deal.title} — คุยงานกับพนักงานขาย ${seller} และเตรียมหน้า Demo`, link: `/demos/${deal.id}` });
+    notify({ user_id: dev.id, title: `มีงานส่งให้คุณ ${deal.code} — กดรับงาน`, body: `${deal.title} — พนักงานขาย ${seller} · เปิดเพื่อกดรับงาน`, link: `/demos/${deal.id}` });
     if (deal.sales_id) {
-      notify({ user_id: deal.sales_id, title: `${dev.name} รับงาน ${deal.code} แล้ว`, body: `${deal.title} — เริ่มคุยงานได้ที่แท็บ “คุยงานกับ dev”`, link: `/deals/${deal.id}` });
+      notify({ user_id: deal.sales_id, title: `เลือก ${dev.name} เป็น dev ของ ${deal.code} แล้ว`, body: `${deal.title} — รอ dev กดรับงาน`, link: `/deals/${deal.id}?tab=team` });
     }
   }
   res.json({ ok: true, dev_id: dev?.id ?? null, dev_name: dev?.name ?? null });
 });
+
+// ผู้ร่วมงานที่ต้องรู้ความคืบหน้าจาก dev: พนักงานขายของงาน + ผู้ถือหุ้น
+export function notifyDealTeam(deal, exceptId, msg) {
+  const ids = new Set([deal.sales_id, ...q.all("SELECT id FROM users WHERE role = 'shareholder' AND active = 1").map((u) => u.id)]);
+  for (const uid of ids) if (uid && uid !== exceptId) notify({ user_id: uid, link: `/deals/${deal.id}`, ...msg });
+}
 
 router.get('/:id/messages', requireAuth, (req, res) => {
   const deal = findDealFor(req, res);
@@ -69,7 +76,7 @@ router.post('/:id/messages', requireAuth, (req, res) => {
     if (!uid || uid === req.user.id) continue;
     notify({
       user_id: uid, title: `ข้อความใหม่ในงาน ${deal.code} จาก ${req.user.name}`, body: body.slice(0, 140),
-      link: uid === deal.dev_id && uid !== deal.sales_id ? `/demos/${deal.id}` : `/deals/${deal.id}`,
+      link: uid === deal.dev_id && uid !== deal.sales_id ? `/demos/${deal.id}` : `/deals/${deal.id}?tab=team`,
     });
   }
   res.status(201).json({ ok: true });

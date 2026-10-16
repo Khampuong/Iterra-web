@@ -2,7 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { q, tx, getSettings, nextCode, today, addDays, addBusinessDays, notify, SYSTEM_STEPS } from '../db.js';
 import { hashPassword, PROJECT_ROLES, requireRole, seesAll, SELL_ROLES, WIDE_ROLES } from '../auth.js';
-import { priceItem, dealTotals, feasibility, suggestDuration, cleanEffort, fallbackAnalyze, parseChecks, requirementOptions } from '../estimator.js';
+import { priceItem, dealTotals, feasibility, suggestDuration, cleanEffort, fallbackAnalyze, fitToBudget, parseChecks, requirementOptions } from '../estimator.js';
 import { fallbackDemo } from '../demo-template.js';
 import { cleanHttpUrl } from '../url.js';
 import { analyzeRequirement, generateDemo, AiUnavailable } from '../ai.js';
@@ -12,10 +12,12 @@ const router = Router();
 const sales = requireRole(...SELL_ROLES); // ขายงานได้
 const view = requireRole(...SELL_ROLES, ...WIDE_ROLES); // ดูงานขายได้
 const admin = requireRole('admin');
+// บันทึกข้อมูลลูกค้า/งบประมาณ และวิเคราะห์ Requirement: คนขายงาน + ผู้ถือหุ้น
+const editors = requireRole(...SELL_ROLES, 'shareholder');
 
 const FIELDS = [
   'title', 'customer_name', 'customer_company', 'customer_email', 'customer_phone',
-  'customer_tax_id', 'customer_address', 'project_type', 'budget', 'deadline', 'requirement', 'requirement_checks',
+  'customer_tax_id', 'customer_address', 'project_type', 'budget', 'deadline', 'requirement', 'requirement_checks', 'quote_note',
 ];
 const CLOSED = ['won', 'lost'];
 
@@ -72,6 +74,15 @@ function currentStep(deal, steps) {
   return steps[Math.max(at(deal.status), at(deal.step), 0)].id;
 }
 
+// เพดานส่วนลดของพนักงานขาย: ราคาก่อน VAT ต้องไม่ต่ำกว่า ราคาตั้งต้น × (100 − เพดาน)%
+// ราคาตั้งต้น = ราคาจากการวิเคราะห์ หรือราคาล่าสุดที่ admin/ผู้ถือหุ้นกำหนด (งานเก่าที่ยังไม่มี ใช้ราคาคำนวณจากรายการ)
+export const isPriceAuthority = (user) => ['admin', 'shareholder'].includes(user.role);
+function priceLimit(deal, settings) {
+  const pct = Number(settings.pricing.max_sales_discount_percent) || 0;
+  const base = deal.price_base ?? dealTotals(pricedItems(deal.id, settings), { discount: 0 }, settings).net;
+  return { price_base: base, price_min: Math.ceil(base * (100 - pct)) / 100, max_sales_discount_percent: pct };
+}
+
 function adminIds() {
   return q.all("SELECT id FROM users WHERE role = 'admin' AND active = 1").map((u) => u.id);
 }
@@ -101,6 +112,7 @@ export function loadDeal(deal, { withDemo = true } = {}) {
     analysis: analysis ? JSON.parse(analysis) : null,
     requirement_checks: parseChecks(deal),
     step: currentStep(deal, settings.sales_steps),
+    ...priceLimit(deal, settings),
     dev_name: deal.dev_id ? q.get('SELECT name FROM users WHERE id = ?', deal.dev_id)?.name ?? null : null,
     has_demo: Boolean(demo_html),
     ...(withDemo ? { demo_html } : {}),
@@ -128,6 +140,13 @@ function replaceItems(dealId, items) {
   });
 }
 
+// รายการที่เลื่อนไปเฟส 2 ตอนปรับขอบเขตให้พอดีงบ (ที่ยังไม่ถูกเพิ่มกลับเข้ารายการงาน)
+function phase2Items(deal, items) {
+  const fit = deal.analysis ? JSON.parse(deal.analysis).budget_fit : null;
+  const titles = new Set(items.map((i) => i.title));
+  return (fit?.deferred ?? []).filter((d) => !titles.has(d.title)).map((d) => ({ title: d.title, description: d.description, price: d.price }));
+}
+
 // ข้อมูลที่ "แช่แข็ง" ลงในเอกสาร ณ วันที่ออก
 function snapshot(deal, settings) {
   const items = pricedItems(deal.id, settings);
@@ -142,7 +161,9 @@ function snapshot(deal, settings) {
     items: items.map((i) => ({ title: i.title, description: i.description, days: i.days, price: i.price })),
     totals,
     payment_terms: settings.payment_terms,
-    sales: q.get('SELECT name, email FROM users WHERE id = ?', deal.sales_id) ?? null,
+    sales: q.get('SELECT name, email, phone FROM users WHERE id = ?', deal.sales_id) ?? null,
+    quote_note: String(deal.quote_note || '').trim(),
+    phase2: phase2Items(deal, items),
   };
 }
 
@@ -220,13 +241,15 @@ router.get('/:id', view, (req, res) => {
 });
 
 // ฝ่ายขายแก้ข้อมูลลูกค้า/Requirement ได้จนกว่าจะปิดงาน ส่วน admin แก้ได้เสมอ
-router.put('/:id', sales, (req, res) => {
+router.put('/:id', editors, (req, res) => {
   const deal = findDeal(req, res);
   if (!deal) return;
   if (CLOSED.includes(deal.status) && req.user.role !== 'admin') return res.status(409).json({ error: 'งานนี้ปิดแล้ว แก้ไขไม่ได้' });
   const b = req.body || {};
   if (!normalizePhone(b)) return res.status(400).json({ error: 'เบอร์โทรศัพท์ต้องเป็นตัวเลขไม่เกิน 10 หลัก' });
   normalizeChecks(b);
+  // งบประมาณ: ตัวเลขมากกว่า 0 เท่านั้น ไม่งั้นถือว่าไม่ระบุ
+  if ('budget' in b) b.budget = Number(b.budget) > 0 ? Math.round(Number(b.budget)) : null;
   const sets = FIELDS.filter((f) => f in b);
   if (sets.length) {
     q.run(
@@ -240,13 +263,15 @@ router.put('/:id', sales, (req, res) => {
 router.delete('/:id', admin, (req, res) => {
   const deal = findDeal(req, res);
   if (!deal) return;
+  // งานที่ปิดการขายแล้วมีโครงการ เอกสาร และรายรับผูกอยู่ จึงลบไม่ได้ เพื่อกันข้อมูลการเงินหาย
   if (deal.status === 'won') return res.status(409).json({ error: 'งานที่ปิดการขายแล้วลบไม่ได้' });
+  // รายการงาน เอกสาร และข้อความคุยงานถูกลบตามไปด้วย (ON DELETE CASCADE)
   q.run('DELETE FROM deals WHERE id = ?', deal.id);
   res.json({ ok: true });
 });
 
 // วิเคราะห์ Requirement -> รายการงาน + man-day + ระยะเวลา
-router.post('/:id/analyze', sales, async (req, res, next) => {
+router.post('/:id/analyze', editors, async (req, res, next) => {
   try {
     const deal = findDeal(req, res);
     if (!deal) return;
@@ -264,16 +289,23 @@ router.post('/:id/analyze', sales, async (req, res, next) => {
     }
 
     const settings = getSettings();
-    const { items, duration_days, ...analysis } = result;
+    const { items: rawItems, duration_days, ...analysis } = result;
+    // ลูกค้าแจ้งงบ: ปรับขอบเขตให้ราคาก่อน VAT ไม่เกินงบ (เลื่อนบางรายการไปเฟส 2 / ลดกำลังคน)
+    const { items, fit } = fitToBudget(rawItems.map((it) => ({ ...it, effort: cleanEffort(it.effort) })), Number(deal.budget) || 0, settings);
+    analysis.budget_fit = fit;
     tx(() => {
       replaceItems(deal.id, items);
       const priced = pricedItems(deal.id, settings);
       const total = dealTotals(priced, deal, settings).days;
-      const duration = Math.round(duration_days) > 0 ? Math.round(duration_days) : suggestDuration(total, settings);
+      // ตัดขอบเขตแล้ว ระยะเวลาลดตามสัดส่วน man-day
+      const ratio = fit && fit.status !== 'within' ? total / Math.max(1, rawItems.reduce((s, it) => s + Object.values(cleanEffort(it.effort)).reduce((a, b) => a + b, 0), 0)) : 1;
+      const duration = Math.round(duration_days) > 0 ? Math.max(5, Math.round(duration_days * ratio)) : suggestDuration(total, settings);
       q.run(
-        "UPDATE deals SET analysis = ?, duration_days = ?, status = CASE WHEN status = 'draft' THEN 'analyzed' ELSE status END WHERE id = ?",
+        "UPDATE deals SET analysis = ?, duration_days = ?, discount = 0, status = CASE WHEN status = 'draft' THEN 'analyzed' ELSE status END WHERE id = ?",
         JSON.stringify({ ...analysis, analyzed_at: new Date().toISOString() }), duration, deal.id,
       );
+      // ราคาจากการวิเคราะห์เป็นราคาตั้งต้นสำหรับคุมเพดานส่วนลดของพนักงานขาย
+      q.run('UPDATE deals SET price_base = ? WHERE id = ?', dealTotals(pricedItems(deal.id, settings), { discount: 0 }, settings).net, deal.id);
     });
     // พนักงานขายรับงานและกดวิเคราะห์แล้ว: แจ้งผู้ถือหุ้นให้กดเลือก dev รับงาน (แจ้งจนกว่าจะมี dev)
     if (!deal.dev_id) {
@@ -314,19 +346,45 @@ router.post('/:id/demo', sales, async (req, res, next) => {
 });
 
 // admin ปรับรายการงาน ราคา ส่วนลด และระยะเวลาก่อนรับงาน
-router.put('/:id/estimate', admin, (req, res) => {
+// ปรับรายการงาน ราคา ส่วนลด และระยะเวลา (ต่อรองกับลูกค้า): admin ผู้ถือหุ้น และพนักงานขายเจ้าของงาน
+// กรรมการดูได้อย่างเดียว · findDeal จำกัดพนักงานขายให้แก้ได้เฉพาะงานของตัวเอง
+router.put('/:id/estimate', requireRole('admin', 'shareholder', ...SELL_ROLES), (req, res) => {
   const deal = findDeal(req, res);
   if (!deal) return;
   if (deal.status === 'won') return res.status(409).json({ error: 'ปิดการขายแล้ว แก้ราคาไม่ได้' });
   const { items, discount, duration_days } = req.body || {};
   if (!Array.isArray(items)) return res.status(400).json({ error: 'รูปแบบรายการงานไม่ถูกต้อง' });
+  const settings = getSettings();
+  const before = dealTotals(pricedItems(deal.id, settings), deal, settings);
+  // ราคาที่จะได้หลังบันทึก (คำนวณก่อนเพื่อตรวจเพดานส่วนลด)
+  const draftItems = items.map((it) => priceItem({ effort: cleanEffort(it.effort), price_override: it.price_override === '' || it.price_override == null ? null : Number(it.price_override) }, settings));
+  const next = dealTotals(draftItems, { discount: Math.max(0, Number(discount) || 0) }, settings);
+  if (!isPriceAuthority(req.user)) {
+    const { price_min, max_sales_discount_percent } = priceLimit(deal, settings);
+    if (next.net < price_min) {
+      return res.status(400).json({ error: `ลดราคาได้ไม่เกิน ${max_sales_discount_percent}% — ราคาก่อน VAT ต้องไม่ต่ำกว่า ${price_min.toLocaleString('th-TH')} บาท (ตอนนี้ ${next.net.toLocaleString('th-TH')} บาท) ถ้าต้องการลดมากกว่านี้ให้ผู้ถือหุ้นหรือผู้ดูแลระบบปรับให้` });
+    }
+  }
   tx(() => {
     replaceItems(deal.id, items);
     q.run(
       "UPDATE deals SET discount = ?, duration_days = ?, status = CASE WHEN status = 'draft' THEN 'analyzed' ELSE status END WHERE id = ?",
       Math.max(0, Number(discount) || 0), Math.max(0, Math.round(Number(duration_days) || 0)), deal.id,
     );
+    // admin/ผู้ถือหุ้นกำหนดราคาใหม่ = ราคาตั้งต้นใหม่สำหรับเพดานส่วนลดของพนักงานขาย
+    if (isPriceAuthority(req.user)) q.run('UPDATE deals SET price_base = ? WHERE id = ?', next.net, deal.id);
   });
+  // พนักงานขายปรับราคาเพื่อต่อรอง: แจ้ง admin และผู้ถือหุ้นให้เห็นยอดก่อน-หลัง
+  if (!['admin', 'shareholder'].includes(req.user.role)) {
+    const after = dealTotals(pricedItems(deal.id, settings), q.get('SELECT * FROM deals WHERE id = ?', deal.id), settings);
+    if (after.net !== before.net) {
+      const fmt = (n) => n.toLocaleString('th-TH');
+      const below = after.net < after.cost ? ' · ต่ำกว่าต้นทุนค่าแรง' : '';
+      for (const u of q.all("SELECT id FROM users WHERE role IN ('admin', 'shareholder') AND active = 1")) {
+        notify({ user_id: u.id, title: `${req.user.name} ปรับราคา ${deal.code}`, body: `${deal.title} — ก่อน VAT ${fmt(before.net)} → ${fmt(after.net)} บาท${below}`, link: `/deals/${deal.id}` });
+      }
+    }
+  }
   res.json(loadDeal(q.get('SELECT * FROM deals WHERE id = ?', deal.id)));
 });
 
@@ -438,7 +496,13 @@ documents.get('/:id', view, (req, res) => {
   const deal = q.get('SELECT * FROM deals WHERE id = ?', doc.deal_id);
   if (!canSee(req.user, deal)) return res.status(403).json({ error: 'ไม่มีสิทธิ์ดูเอกสารนี้' });
   const ref = doc.ref_id ? q.get('SELECT number FROM documents WHERE id = ?', doc.ref_id) : null;
-  res.json({ ...doc, data: JSON.parse(doc.data), ref_number: ref?.number ?? null });
+  // เอกสารเก่าที่ออกก่อนกรอกที่อยู่/เบอร์บริษัท: เติมเฉพาะช่องที่ว่างจากข้อมูลบริษัทปัจจุบัน
+  const data = JSON.parse(doc.data);
+  if (data.company) {
+    const now = getSettings().company;
+    for (const k of ['address', 'phone', 'email', 'tax_id']) if (!data.company[k] && now[k]) data.company[k] = now[k];
+  }
+  res.json({ ...doc, data, ref_number: ref?.number ?? null });
 });
 
 // รับชำระใบแจ้งหนี้ -> ออกใบเสร็จรับเงิน + บันทึกรายรับ (ยอดก่อน VAT)
