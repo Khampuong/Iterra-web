@@ -261,7 +261,8 @@ export const DEFAULT_SETTINGS = {
     { label: 'งวดที่ 2 เมื่อส่งมอบและตรวจรับงาน', percent: 50 },
   ],
   sharing: { sales_percent: 5, company_percent: 40 },
-  capacity: { max_active_projects: 5, parallel_people: 3, buffer_percent: 15 },
+  // hours_per_day: ชั่วโมงทำงานต่อ 1 man-day (อัตราค่าแรงตั้งเป็นบาท/ชั่วโมง)
+  capacity: { max_active_projects: 5, parallel_people: 3, buffer_percent: 15, hours_per_day: 8 },
   // ขั้นตอนงานขาย: draft / analyzed / quoted / won เป็นขั้นตอนของระบบ (แก้ชื่อได้ ลบไม่ได้)
   // admin เพิ่มขั้นตอนของตัวเองได้ (รหัสขึ้นต้นด้วย c_) โดย won ต้องอยู่ท้ายสุดเสมอ
   sales_steps: [
@@ -287,6 +288,17 @@ export function getSettings() {
     out[row.key] = Array.isArray(v) ? v : { ...out[row.key], ...v };
   }
   return out;
+}
+
+// อัตราค่าแรงเดิมบันทึกเป็นบาท/man-day: แปลงเป็นบาท/ชั่วโมงครั้งเดียว (÷ ชั่วโมงต่อวัน)
+if (db.prepare('PRAGMA user_version').get().user_version < 1) {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'rates'").get();
+  if (row) {
+    const perDay = JSON.parse(row.value);
+    const perHour = Object.fromEntries(Object.entries(perDay).map(([k, v]) => [k, Math.round((Number(v) / 8) * 100) / 100]));
+    db.prepare("UPDATE settings SET value = ? WHERE key = 'rates'").run(JSON.stringify(perHour));
+  }
+  db.exec('PRAGMA user_version = 1');
 }
 
 export function setSetting(key, value) {

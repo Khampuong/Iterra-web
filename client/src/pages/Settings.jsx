@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, phoneDigits, ROLE_LABEL } from '../lib.js';
+import { api, money, phoneDigits, ROLE_LABEL } from '../lib.js';
 import { Avatar, Badge, Field, Icon, Modal, PhotoPicker, Tabs, useApp, useData } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 
@@ -51,21 +51,25 @@ function Pricing({ settings, save }) {
   const { meta } = useApp();
   const [rates, setRates] = useState(settings.rates);
   useEffect(() => setRates(settings.rates), [settings.rates]);
+  const hours = Number(settings.capacity.hours_per_day) > 0 ? Number(settings.capacity.hours_per_day) : 8;
 
   return (
     <div className="stack">
       <NumberForm title="การตั้งราคา" hint="ราคาเสนอ = ต้นทุนค่าแรง × (1 + กำไรขั้นต้น)" value={settings.pricing} onSave={(v) => save('pricing', v)}
         fields={[['margin_percent', 'กำไรขั้นต้นบวกเพิ่ม (%)'], ['vat_percent', 'VAT (%)'], ['quote_valid_days', 'ยืนราคาใบเสนอราคา (วัน)'], ['max_sales_discount_percent', 'พนักงานขายลดราคาได้ไม่เกิน (%)']]} />
       <NumberForm title="กำลังการผลิตของทีม" hint="ใช้ประเมินระยะเวลาและความเป็นไปได้ก่อนรับงาน" value={settings.capacity} onSave={(v) => save('capacity', v)}
-        fields={[['max_active_projects', 'รับโครงการพร้อมกันได้สูงสุด'], ['parallel_people', 'จำนวนคนทำงานขนานกันต่อโครงการ'], ['buffer_percent', 'เผื่อเวลา (%)']]} />
+        fields={[['max_active_projects', 'รับโครงการพร้อมกันได้สูงสุด'], ['parallel_people', 'จำนวนคนทำงานขนานกันต่อโครงการ'], ['buffer_percent', 'เผื่อเวลา (%)'], ['hours_per_day', 'ชั่วโมงทำงานต่อ man-day']]} />
       <div className="card stack">
-        <div><h2>อัตราต้นทุนค่าแรงต่อ man-day (บาท)</h2><p className="small muted">ค่าเริ่มต้นเป็นตัวเลขตั้งต้น ควรปรับให้ตรงกับต้นทุนจริงของบริษัท</p></div>
+        <div><h2>อัตราต้นทุนค่าแรงต่อชั่วโมง (บาท)</h2><p className="small muted">ต้นทุนต่อ man-day = อัตราต่อชั่วโมง × {hours} ชั่วโมง (ตั้งได้ที่ “ชั่วโมงทำงานต่อ man-day”) · ค่าเริ่มต้นเป็นตัวเลขตั้งต้น ควรปรับให้ตรงกับต้นทุนจริงของบริษัท</p></div>
         {meta.groups.map((g) => (
           <div key={g.id}>
             <h3 style={{ marginBottom: 10 }}>{g.name}</h3>
             <div className="grid g3">
               {meta.positions.filter((p) => p.group === g.id).map((p) => (
-                <Field key={p.code} label={`${p.code} · ${p.name}`}><input type="number" min="0" step="100" value={rates[p.code]} onChange={(e) => setRates({ ...rates, [p.code]: e.target.value })} /></Field>
+                <Field key={p.code} label={`${p.code} · ${p.name}`}>
+                  <input type="number" min="0" step="10" value={rates[p.code]} onChange={(e) => setRates({ ...rates, [p.code]: e.target.value })} />
+                  <span className="small muted">≈ {money(Number(rates[p.code] || 0) * hours)} / man-day</span>
+                </Field>
               ))}
             </div>
           </div>

@@ -17,7 +17,7 @@ export default function TimelineEditor({ p, onSaved, onCancel }) {
     setRows(generatePlan(p).map(([start, end, type, text]) => ({ start, end, type, text })));
   };
   const save = async () => {
-    if (await run(() => api.put(`/projects/${p.id}/timeline`, { items: rows, title: title === p.name ? '' : title, intro, note }), 'บันทึกปฏิทินแผนงานแล้ว')) onSaved();
+    if (await run(() => api.put(`/projects/${p.id}/timeline`, { items: rows, title: title === p.name ? '' : title, intro, note }), 'บันทึกปฏิทินแผนงานแล้ว — แจ้งเตือนทีมของโครงการเรียบร้อย')) onSaved();
   };
   const sorted = [...rows].filter((r) => r.start && r.end && r.text).sort((a, b) => a.start.localeCompare(b.start));
 

@@ -3,6 +3,7 @@ import { q, tx, getSettings, nextCode, today, addBusinessDays, notify } from '..
 import { PROJECT_ROLES, requireAuth, requireRole, seesAll } from '../auth.js';
 import { effortByPosition } from '../estimator.js';
 import { PHASES, POSITION_CODES, positionByCode } from '../positions.js';
+import { notifyTeam, runTimelineReminders } from '../reminders.js';
 
 const router = Router();
 const admin = requireRole('admin');
@@ -249,7 +250,14 @@ router.put('/:id/timeline', admin, (req, res) => {
       String(req.body?.title || '').trim().slice(0, 120), String(req.body?.intro || '').trim().slice(0, 600), String(req.body?.note || '').trim().slice(0, 2000), p.id,
     );
   });
-  res.json({ ok: true, count: clean.length });
+  // แจ้งทุกคนในทีมของโครงการว่าแผนงานเปลี่ยน พร้อมรายการที่ใกล้ถึง
+  const now = today();
+  const next = clean.filter((it) => it.end >= now).sort((x, y) => x.start.localeCompare(y.start)).slice(0, 3).map((it) => `${it.start === it.end ? it.start : `${it.start}–${it.end}`} ${it.text}`);
+  const notified = clean.length
+    ? notifyTeam(p.id, { title: `อัปเดตปฏิทินแผนงาน ${p.code}`, body: `${p.name} — ${clean.length} รายการ${next.length ? ` · ถัดไป: ${next.join(' / ')}` : ''}` }, req.user.id)
+    : 0;
+  runTimelineReminders(); // รายการที่เริ่ม/ครบกำหนดวันนี้หรือพรุ่งนี้ แจ้งทันที
+  res.json({ ok: true, count: clean.length, notified });
 });
 
 router.post('/:id/tasks', admin, (req, res) => {

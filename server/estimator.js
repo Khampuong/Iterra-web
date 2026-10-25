@@ -15,11 +15,13 @@ export function cleanEffort(effort) {
 
 export function priceItem(item, settings) {
   const effort = typeof item.effort === 'string' ? JSON.parse(item.effort) : item.effort || {};
+  // อัตราค่าแรงเป็นบาท/ชั่วโมง: ต้นทุน = man-day × ชั่วโมงต่อวัน × อัตรา
+  const hours = Number(settings.capacity.hours_per_day) > 0 ? Number(settings.capacity.hours_per_day) : 8;
   let days = 0;
   let cost = 0;
   for (const [code, d] of Object.entries(effort)) {
     days += d;
-    cost += d * (settings.rates[code] ?? 0);
+    cost += d * hours * (settings.rates[code] ?? 0);
   }
   const computed = round100(cost * (1 + settings.pricing.margin_percent / 100));
   const price = item.price_override != null ? Number(item.price_override) : computed;
