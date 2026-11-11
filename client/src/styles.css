@@ -421,3 +421,8 @@ button.step:disabled { cursor: default; color: inherit; }
 table.jv td.cr { padding-left: 32px; }
 tr.total td { font-weight: 600; border-top: 1px solid var(--line); }
 .danger-text { color: var(--danger); }
+
+/* ตำแหน่งที่เกี่ยวข้องกับงาน (ประเมินระหว่างเลือก Requirement) */
+.role-preview { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--accent-soft); }
+.role-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.role-chip { display: inline-flex; gap: 4px; align-items: baseline; padding: 4px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; cursor: help; }

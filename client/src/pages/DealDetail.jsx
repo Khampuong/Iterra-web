@@ -5,6 +5,7 @@ import { Avatar, Badge, Bar, Field, Icon, Modal, RequirementChecklist, Tabs, use
 import { PageHead } from '../components/Layout.jsx';
 import DealChat from '../components/DealChat.jsx';
 import DealExtras from '../components/DealExtras.jsx';
+import { RolePreview, RoleTable } from '../components/RolePlan.jsx';
 
 const FEAS_COLOR = { go: 'var(--ok)', conditional: '#d39a1c', 'no-go': 'var(--danger)' };
 const tone = (score) => (score >= 75 ? 'ok' : score >= 50 ? 'warn' : 'danger');
@@ -160,6 +161,7 @@ function RequirementTab({ deal, canEdit, canAnalyze, busy, onSave, onAnalyze, on
           <textarea style={{ minHeight: 160 }} value={v('requirement')} onChange={set('requirement')} disabled={!canEdit}
             placeholder="อธิบายสิ่งที่ลูกค้าต้องการ: ใครใช้งาน ทำอะไรได้บ้าง ต้องเชื่อมกับระบบใด มีข้อจำกัดอะไร" />
         </Field>
+        {canEdit && <RolePreview title={f.title} checks={f.requirement_checks ?? []} requirement={f.requirement ?? ''} />}
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <span className="small muted">ยิ่งรายละเอียดชัด ราคาและระยะเวลาที่ประเมินยิ่งแม่น</span>
           <div className="row">
@@ -350,6 +352,8 @@ function EstimateTab({ deal, canPrice, limited, canSell, canAnalyze, busy, onSav
           </div>
         </div>
       )}
+
+      {!edit && <RoleTable roles={deal.roles} showCost={!['sales', 'staff'].includes(user.role)} />}
 
       {!edit && analysis && (
         <div className="card">

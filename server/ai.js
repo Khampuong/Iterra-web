@@ -48,6 +48,8 @@ const AnalysisSchema = z.object({
   risks: z.array(z.string()),
   assumptions: z.array(z.string()),
   questions: z.array(z.string()).describe('คำถามที่ควรถามลูกค้าเพิ่มก่อนยืนยันราคา'),
+  roles: z.array(z.object({ position: z.enum(POSITION_CODES), reason: z.string() }))
+    .describe('เฉพาะตำแหน่งที่งานนี้ต้องใช้จริง พร้อมเหตุผลสั้นๆ ว่าตำแหน่งนี้ทำอะไรในงานนี้'),
   items: z.array(
     z.object({
       title: z.string(),
@@ -65,6 +67,9 @@ ${POSITIONS.map((p) => `- ${p.code}: ${p.name} (${p.th})`).join('\n')}
 
 แนวทาง:
 - แตกงานเป็นรายการที่ลูกค้าเข้าใจและตรวจรับได้ (ฟีเจอร์/โมดูล) รวมงานเก็บ Requirement ออกแบบ ทดสอบ และนำขึ้นใช้งานเป็นรายการของตัวเอง
+- ขั้นแรกวิเคราะห์ว่างานนี้ต้องใช้ตำแหน่งใดบ้าง (roles) จากลักษณะงานจริง แล้วจึงประเมิน man-day เฉพาะตำแหน่งเหล่านั้น — ห้ามใส่ทุกตำแหน่ง
+- งานเล็ก (เว็บไซต์/โมดูลเดี่ยว) ไม่ต้องมี Solution Architect, Business Analyst, System Analyst, DBA, Tech Lead หรือ Product Owner แยก — PM และนักพัฒนาทำแทนได้
+- ใส่ BA เมื่อมีขั้นตอนธุรกิจซับซ้อน, SA เมื่อมีระบบหลังบ้าน/ข้อมูลหลายส่วน, ARCH เมื่อเชื่อมหลายระบบหรือหลายแพลตฟอร์ม, SEC เมื่อมีการเงินหรือข้อมูลอ่อนไหว, MOBILE เมื่อมีแอปมือถือเท่านั้น
 - ประเมิน man-day ต่อตำแหน่งตามจริงสำหรับทีมขนาดเล็กที่มีประสบการณ์ ใส่เฉพาะตำแหน่งที่จำเป็นต่อรายการนั้น ทศนิยมได้ทีละ 0.5
 - ไม่ต้องประเมินราคา ระบบจะคำนวณราคาจากอัตราค่าแรงเอง
 - technical_score สะท้อนความชัดเจนของ Requirement และความยากทางเทคนิค ไม่เกี่ยวกับงบหรือกำหนดเวลา
@@ -101,9 +106,10 @@ ${deal.requirement || '(ไม่มี)'}`,
     });
     if (res.stop_reason === 'refusal') throw new AiUnavailable('Claude ปฏิเสธการวิเคราะห์ Requirement นี้');
     if (!res.parsed_output) throw new AiUnavailable('Claude ตอบกลับไม่ครบ (ผลลัพธ์ถูกตัด)');
-    const out = res.parsed_output;
+    const { roles, ...out } = res.parsed_output;
     return {
       ...out,
+      role_reasons: Object.fromEntries(roles.map((r) => [r.position, r.reason])),
       source: 'claude',
       model: res.model,
       items: out.items.map((it) => ({
