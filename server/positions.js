@@ -1,5 +1,5 @@
 // ตำแหน่งงาน 17 บทบาท 4 กลุ่ม และ 6 ช่วงการทำงาน ตาม Software Team Guide
-// rate = ค่าเริ่มต้นต้นทุนต่อ man-day (บาท) แก้ไขได้ในหน้า "ตั้งค่า"
+// rate = ค่าเริ่มต้นต้นทุนค่าแรงต่อชั่วโมง (บาท) แก้ไขได้ในหน้า "ตั้งค่า" (1 man-day = ชั่วโมงทำงานต่อวันตามตั้งค่า)
 
 export const GROUPS = [
   { id: 'plan', name: 'วางแผนและธุรกิจ' },
@@ -18,23 +18,23 @@ export const PHASES = [
 ];
 
 export const POSITIONS = [
-  { code: 'PO', name: 'Product Owner', th: 'เจ้าของผลิตภัณฑ์', group: 'plan', phase: 'requirement', rate: 6000 },
-  { code: 'PM', name: 'Project Manager', th: 'ผู้จัดการโครงการ', group: 'plan', phase: 'requirement', rate: 5500 },
-  { code: 'BA', name: 'Business Analyst', th: 'นักวิเคราะห์ธุรกิจ', group: 'plan', phase: 'requirement', rate: 4500 },
-  { code: 'SA', name: 'System Analyst', th: 'นักวิเคราะห์ระบบ', group: 'design', phase: 'design', rate: 5000 },
-  { code: 'ARCH', name: 'Solution Architect', th: 'สถาปนิกโซลูชัน', group: 'design', phase: 'design', rate: 7000 },
-  { code: 'UX', name: 'UI/UX Designer', th: 'นักออกแบบประสบการณ์ผู้ใช้', group: 'design', phase: 'design', rate: 4500 },
-  { code: 'FE', name: 'Frontend Developer', th: 'นักพัฒนาหน้าจอ', group: 'dev', phase: 'development', rate: 4000 },
-  { code: 'BE', name: 'Backend Developer', th: 'นักพัฒนาระบบหลังบ้าน', group: 'dev', phase: 'development', rate: 4500 },
-  { code: 'FULL', name: 'Full Stack Developer', th: 'นักพัฒนาแบบครบส่วน', group: 'dev', phase: 'development', rate: 4500 },
-  { code: 'MOBILE', name: 'Mobile Developer', th: 'นักพัฒนาแอปมือถือ', group: 'dev', phase: 'development', rate: 4500 },
-  { code: 'DBA', name: 'Database Administrator', th: 'ผู้ดูแลฐานข้อมูล', group: 'dev', phase: 'development', rate: 5000 },
-  { code: 'LEAD', name: 'Tech Lead', th: 'หัวหน้าด้านเทคนิค', group: 'dev', phase: 'development', rate: 6500 },
-  { code: 'QA', name: 'QA / Software Tester', th: 'ผู้ทดสอบระบบ', group: 'ops', phase: 'testing', rate: 3500 },
-  { code: 'DEVOPS', name: 'DevOps Engineer', th: 'วิศวกรระบบส่งมอบซอฟต์แวร์', group: 'ops', phase: 'deployment', rate: 5000 },
-  { code: 'INFRA', name: 'Infrastructure / Cloud Engineer', th: 'วิศวกรโครงสร้างพื้นฐาน', group: 'ops', phase: 'deployment', rate: 5000 },
-  { code: 'SEC', name: 'Security Engineer', th: 'วิศวกรความปลอดภัย', group: 'ops', phase: 'testing', rate: 6000 },
-  { code: 'SUPPORT', name: 'Support / Maintenance', th: 'ผู้ดูแลระบบหลังส่งมอบ', group: 'ops', phase: 'support', rate: 3000 },
+  { code: 'PO', name: 'Product Owner', th: 'เจ้าของผลิตภัณฑ์', group: 'plan', phase: 'requirement', rate: 750 },
+  { code: 'PM', name: 'Project Manager', th: 'ผู้จัดการโครงการ', group: 'plan', phase: 'requirement', rate: 687.5 },
+  { code: 'BA', name: 'Business Analyst', th: 'นักวิเคราะห์ธุรกิจ', group: 'plan', phase: 'requirement', rate: 562.5 },
+  { code: 'SA', name: 'System Analyst', th: 'นักวิเคราะห์ระบบ', group: 'design', phase: 'design', rate: 625 },
+  { code: 'ARCH', name: 'Solution Architect', th: 'สถาปนิกโซลูชัน', group: 'design', phase: 'design', rate: 875 },
+  { code: 'UX', name: 'UI/UX Designer', th: 'นักออกแบบประสบการณ์ผู้ใช้', group: 'design', phase: 'design', rate: 562.5 },
+  { code: 'FE', name: 'Frontend Developer', th: 'นักพัฒนาหน้าจอ', group: 'dev', phase: 'development', rate: 500 },
+  { code: 'BE', name: 'Backend Developer', th: 'นักพัฒนาระบบหลังบ้าน', group: 'dev', phase: 'development', rate: 562.5 },
+  { code: 'FULL', name: 'Full Stack Developer', th: 'นักพัฒนาแบบครบส่วน', group: 'dev', phase: 'development', rate: 562.5 },
+  { code: 'MOBILE', name: 'Mobile Developer', th: 'นักพัฒนาแอปมือถือ', group: 'dev', phase: 'development', rate: 562.5 },
+  { code: 'DBA', name: 'Database Administrator', th: 'ผู้ดูแลฐานข้อมูล', group: 'dev', phase: 'development', rate: 625 },
+  { code: 'LEAD', name: 'Tech Lead', th: 'หัวหน้าด้านเทคนิค', group: 'dev', phase: 'development', rate: 812.5 },
+  { code: 'QA', name: 'QA / Software Tester', th: 'ผู้ทดสอบระบบ', group: 'ops', phase: 'testing', rate: 437.5 },
+  { code: 'DEVOPS', name: 'DevOps Engineer', th: 'วิศวกรระบบส่งมอบซอฟต์แวร์', group: 'ops', phase: 'deployment', rate: 625 },
+  { code: 'INFRA', name: 'Infrastructure / Cloud Engineer', th: 'วิศวกรโครงสร้างพื้นฐาน', group: 'ops', phase: 'deployment', rate: 625 },
+  { code: 'SEC', name: 'Security Engineer', th: 'วิศวกรความปลอดภัย', group: 'ops', phase: 'testing', rate: 750 },
+  { code: 'SUPPORT', name: 'Support / Maintenance', th: 'ผู้ดูแลระบบหลังส่งมอบ', group: 'ops', phase: 'support', rate: 375 },
 ];
 
 export const POSITION_CODES = POSITIONS.map((p) => p.code);

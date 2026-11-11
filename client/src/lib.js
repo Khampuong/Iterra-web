@@ -70,7 +70,7 @@ export const PROJECT_STATUS = {
   hold: { label: 'พักโครงการ', tone: 'warn' },
 };
 export const TASK_STATUS = { todo: 'รอเริ่ม', doing: 'กำลังทำ', review: 'รอตรวจ', done: 'เสร็จ' };
-export const DOC_TYPE = { quotation: 'ใบเสนอราคา', contract: 'สัญญาจ้างพัฒนาระบบ', invoice: 'ใบแจ้งหนี้', receipt: 'ใบเสร็จรับเงิน' };
+export const DOC_TYPE = { quotation: 'ใบเสนอราคา', contract: 'สัญญาจ้างพัฒนาระบบ', invoice: 'ใบแจ้งหนี้', receipt: 'ใบเสร็จรับเงิน/ใบกำกับภาษี' };
 export const ROLE_LABEL = { admin: 'ผู้ดูแลระบบ', shareholder: 'ผู้ถือหุ้น', director: 'กรรมการ', sales: 'พนักงานขาย', staff: 'พนักงาน' };
 // สิทธิ์ตามบทบาท (ต้องตรงกับ server/auth.js)
 export const WIDE = ['admin', 'shareholder', 'director']; // ดูได้ทั้งหมด

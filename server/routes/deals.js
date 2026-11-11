@@ -2,11 +2,13 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { q, tx, getSettings, nextCode, today, addDays, addBusinessDays, notify, SYSTEM_STEPS } from '../db.js';
 import { hashPassword, PROJECT_ROLES, requireRole, seesAll, SELL_ROLES, WIDE_ROLES } from '../auth.js';
-import { priceItem, dealTotals, feasibility, suggestDuration, cleanEffort, fallbackAnalyze, fitToBudget, parseChecks, requirementOptions } from '../estimator.js';
+import { priceItem, dealTotals, feasibility, suggestDuration, cleanEffort, fallbackAnalyze, fitToBudget, parseChecks, requirementOptions, summarizeRoles } from '../estimator.js';
 import { fallbackDemo } from '../demo-template.js';
 import { cleanHttpUrl } from '../url.js';
 import { analyzeRequirement, generateDemo, AiUnavailable } from '../ai.js';
 import { createProjectFromDeal } from './projects.js';
+import { POSITION_CODES } from '../positions.js';
+import { LedgerError, receivePayment } from '../ledger.js';
 
 const router = Router();
 const sales = requireRole(...SELL_ROLES); // ขายงานได้
@@ -112,6 +114,8 @@ export function loadDeal(deal, { withDemo = true } = {}) {
     analysis: analysis ? JSON.parse(analysis) : null,
     requirement_checks: parseChecks(deal),
     step: currentStep(deal, settings.sales_steps),
+    // ตำแหน่งที่งานนี้ใช้จริง คำนวณจากรายการงานปัจจุบัน (แก้รายการแล้วอัปเดตตาม)
+    roles: summarizeRoles(items, analysis ? JSON.parse(analysis).role_reasons : null, settings),
     ...priceLimit(deal, settings),
     dev_name: deal.dev_id ? q.get('SELECT name FROM users WHERE id = ?', deal.dev_id)?.name ?? null : null,
     has_demo: Boolean(demo_html),
@@ -212,6 +216,25 @@ router.get('/', view, (req, res) => {
       sales_name: q.get('SELECT name FROM users WHERE id = ?', d.sales_id)?.name ?? null,
     };
   }));
+});
+
+// ประเมินเบื้องต้นระหว่างเลือก Requirement: ตำแหน่งที่เกี่ยวข้อง + ราคาประมาณ (ยังไม่บันทึก)
+router.post('/plan-preview', editors, (req, res) => {
+  const b = { requirement_checks: req.body?.requirement_checks ?? [] };
+  normalizeChecks(b);
+  const draft = { title: String(req.body?.title || ''), project_type: '', requirement: String(req.body?.requirement || '').slice(0, 5000), requirement_checks: b.requirement_checks };
+  if (!parseChecks(draft).length && !draft.requirement.trim()) return res.json({ roles: [], days: 0, net: 0, items: [] });
+  const settings = getSettings();
+  const plan = fallbackAnalyze(draft);
+  const priced = plan.items.map((i) => priceItem({ ...i, effort: cleanEffort(i.effort) }, settings));
+  const totals = dealTotals(priced, { discount: 0 }, settings);
+  const showCost = !['sales', 'staff'].includes(req.user.role);
+  res.json({
+    roles: summarizeRoles(priced, plan.role_reasons, settings).map(({ cost, ...r }) => (showCost ? { ...r, cost } : r)),
+    total_positions: POSITION_CODES.length,
+    days: totals.days, net: totals.net, total: totals.total,
+    items: priced.map((i) => i.title),
+  });
 });
 
 router.post('/', sales, (req, res) => {
@@ -514,21 +537,30 @@ documents.post('/:id/pay', admin, (req, res) => {
   const data = JSON.parse(inv.data);
   const paidAt = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.date || '') ? req.body.date : today();
   const project = q.get('SELECT id FROM projects WHERE deal_id = ?', deal.id);
+  const whtPercent = Number(req.body?.wht_percent) || 0; // ลูกค้าหักภาษี ณ ที่จ่าย (เช่น 3%)
 
-  const receipt = tx(() => {
-    q.run("UPDATE documents SET status = 'paid' WHERE id = ?", inv.id);
-    const r = createDocument(deal, 'receipt', 'RC', {
-      amount: inv.amount, ref_id: inv.id, status: 'paid', issued_at: paidAt,
-      data: { ...data, paid_at: paidAt, method: req.body?.method || 'โอนเงิน' },
+  let receipt;
+  try {
+    receipt = tx(() => {
+      q.run("UPDATE documents SET status = 'paid' WHERE id = ?", inv.id);
+      const r = createDocument(deal, 'receipt', 'RC', {
+        amount: inv.amount, ref_id: inv.id, status: 'paid', issued_at: paidAt,
+        data: { ...data, paid_at: paidAt, method: req.body?.method || 'โอนเงิน' },
+      });
+      q.run(
+        "INSERT INTO transactions (project_id, type, category, amount, date, note, document_id) VALUES (?, 'income', 'รับชำระค่างาน', ?, ?, ?, ?)",
+        project?.id ?? null, data.installment.net, paidAt,
+        `${inv.number} ${data.installment.label} (VAT ${data.installment.vat.toLocaleString('th-TH')} บาท แยกต่างหาก)`, r.id,
+      );
+      // บันทึกบัญชี: วางบิล (ถ้ายังไม่ได้วาง) + รับชำระ ย้ายภาษีขายรอเรียกเก็บ 21310 -> ภาษีขาย 21300 (tax point งานบริการ)
+      receivePayment(inv, { date: paidAt, wht_percent: whtPercent, method: req.body?.method || 'โอนเงิน', receipt_id: r.id, user_id: req.user.id, revenue_account: req.body?.revenue_account || '41100' });
+      if (deal.sales_id) notify({ user_id: deal.sales_id, title: `รับชำระ ${inv.number}`, body: deal.title, link: `/deals/${deal.id}` });
+      return r;
     });
-    q.run(
-      "INSERT INTO transactions (project_id, type, category, amount, date, note, document_id) VALUES (?, 'income', 'รับชำระค่างาน', ?, ?, ?, ?)",
-      project?.id ?? null, data.installment.net, paidAt,
-      `${inv.number} ${data.installment.label} (VAT ${data.installment.vat.toLocaleString('th-TH')} บาท แยกต่างหาก)`, r.id,
-    );
-    if (deal.sales_id) notify({ user_id: deal.sales_id, title: `รับชำระ ${inv.number}`, body: deal.title, link: `/deals/${deal.id}` });
-    return r;
-  });
+  } catch (e) {
+    if (e instanceof LedgerError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
   res.json(receipt);
 });
 

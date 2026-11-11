@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, date, money, money2, PROJECT_STATUS, TASK_STATUS, todayStr, WIDE } from '../lib.js';
 import { Badge, Bar, Field, Icon, Modal, Stat, Tabs, useApp, useData } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
@@ -12,7 +12,10 @@ export default function ProjectDetail() {
   const { id } = useParams();
   const { user, run } = useApp();
   const [p, reload] = useData(`/projects/${id}`);
-  const [tab, setTab] = useState('overview');
+  // เปิดแท็บตามลิงก์จากการแจ้งเตือน เช่น /projects/3?tab=calendar
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(params.get('tab') || 'overview');
+  useEffect(() => { if (params.get('tab')) setTab(params.get('tab')); }, [params]);
   const [editTimeline, setEditTimeline] = useState(false);
   if (!p) return null;
   const isAdmin = user.role === 'admin';

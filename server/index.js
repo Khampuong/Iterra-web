@@ -8,9 +8,11 @@ import adminRoutes from './routes/admin.js';
 import dealRoutes, { documents } from './routes/deals.js';
 import projectRoutes from './routes/projects.js';
 import financeRoutes from './routes/finance.js';
+import accountingRoutes from './routes/accounting.js';
 import demoRoutes from './routes/demos.js';
 import teamRoutes from './routes/teamwork.js';
 import extraRoutes from './routes/extras.js';
+import { startTimelineReminders } from './reminders.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, '..', 'dist');
@@ -45,6 +47,7 @@ app.use('/api/deals', dealRoutes);
 app.use('/api/documents', documents);
 app.use('/api/projects', projectRoutes);
 app.use('/api/demos', demoRoutes);
+app.use('/api', accountingRoutes); // เมนูการเงิน (บัญชี)
 app.use('/api', financeRoutes);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'ไม่พบ API นี้' }));
 
@@ -59,4 +62,7 @@ app.use((err, _req, res, _next) => {
 });
 
 const port = Number(process.env.PORT) || 4000;
-app.listen(port, () => console.log(`Iterra API พร้อมใช้งานที่ http://localhost:${port}`));
+app.listen(port, () => {
+  console.log(`Iterra API พร้อมใช้งานที่ http://localhost:${port}`);
+  startTimelineReminders(); // แจ้งเตือนทีมตามปฏิทินแผนงาน
+});

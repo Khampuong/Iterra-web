@@ -15,11 +15,13 @@ export function cleanEffort(effort) {
 
 export function priceItem(item, settings) {
   const effort = typeof item.effort === 'string' ? JSON.parse(item.effort) : item.effort || {};
+  // อัตราค่าแรงเป็นบาท/ชั่วโมง: ต้นทุน = man-day × ชั่วโมงต่อวัน × อัตรา
+  const hours = Number(settings.capacity.hours_per_day) > 0 ? Number(settings.capacity.hours_per_day) : 8;
   let days = 0;
   let cost = 0;
   for (const [code, d] of Object.entries(effort)) {
     days += d;
-    cost += d * (settings.rates[code] ?? 0);
+    cost += d * hours * (settings.rates[code] ?? 0);
   }
   const computed = round100(cost * (1 + settings.pricing.margin_percent / 100));
   const price = item.price_override != null ? Number(item.price_override) : computed;
@@ -142,6 +144,75 @@ export function parseChecks(deal) {
 // ส่วนเสริมที่เลื่อนไปเฟส 2 ได้ก่อนเมื่อเกินงบ
 const OPTIONAL_MODULES = ['service', 'chat', 'notify', 'dashboard', 'mobile'];
 
+// ---------- เลือกเฉพาะตำแหน่งที่เกี่ยวข้องกับงาน ----------
+// งานพื้นฐาน (วางแผน ออกแบบ ทดสอบ ส่งมอบ) ใส่เฉพาะตำแหน่งที่ขนาด/ลักษณะงานต้องใช้จริง ไม่ใส่ทุกตำแหน่ง
+const PROCESS_HEAVY = ['erp', 'booking', 'training', 'payment', 'docs', 'shop']; // มีขั้นตอนธุรกิจต้องเก็บรายละเอียด
+const ARCH_HEAVY = ['erp', 'api', 'mobile']; // ต้องออกแบบสถาปัตยกรรม/การเชื่อมต่อ
+export function planFoundation(modules) {
+  const ids = modules.map((m) => m.id).filter(Boolean);
+  const has = (list) => list.filter((x) => ids.includes(x));
+  const dev = modules.reduce((s, m) => s + Object.values(m.effort).reduce((a, b) => a + b, 0), 0);
+  const used = new Set(modules.flatMap((m) => Object.keys(m.effort)));
+  const days = (ratio, min) => Math.max(min, Math.round(dev * ratio * 2) / 2);
+  const reasons = {};
+  const why = (code, text) => { reasons[code] = reasons[code] ? `${reasons[code]} · ${text}` : text; };
+
+  const plan = { PM: days(0.06, 0.5) };
+  why('PM', 'ประสานงานลูกค้า วางแผนและติดตามงาน');
+  const process = has(PROCESS_HEAVY);
+  if (dev >= 20 || process.length) {
+    plan.BA = days(0.06, 1);
+    why('BA', process.length ? 'มีขั้นตอนธุรกิจต้องเก็บรายละเอียด' : 'งานขนาดกลาง-ใหญ่ ต้องสรุปขอบเขตให้ชัด');
+  }
+
+  const design = {};
+  if (used.has('BE') && dev >= 15) { design.SA = days(0.06, 1); why('SA', 'ออกแบบโครงสร้างข้อมูลและขั้นตอนของระบบหลังบ้าน'); }
+  const arch = has(ARCH_HEAVY);
+  if (arch.length || dev >= 45) { design.ARCH = days(0.03, 1); why('ARCH', arch.length ? 'มีการเชื่อมต่อ/หลายแพลตฟอร์ม ต้องวางสถาปัตยกรรม' : 'ระบบขนาดใหญ่ ต้องวางสถาปัตยกรรม'); }
+
+  const test = {};
+  if (dev >= 8) { test.QA = days(0.06, 0.5); why('QA', 'ทดสอบรวมและช่วยลูกค้าตรวจรับ'); }
+  if (dev >= 30) test.PM = days(0.02, 0.5);
+
+  const ship = {};
+  if (!ids.includes('hosting')) { ship.DEVOPS = days(0.03, 0.5); why('DEVOPS', 'นำระบบขึ้นใช้งานจริง'); }
+  if (!ids.includes('service')) { ship.SUPPORT = 0.5; why('SUPPORT', 'ส่งมอบและสอนการใช้งาน'); }
+
+  // เหตุผลของตำแหน่งที่มาจากรายการงาน
+  for (const m of modules) for (const code of Object.keys(m.effort)) why(code, m.title);
+
+  const items = [
+    { title: 'เก็บ Requirement และวางแผนโครงการ', description: 'สรุปขอบเขต แผนงาน และเกณฑ์ตรวจรับ', effort: plan, priority: 'must' },
+    Object.keys(design).length && { title: 'วิเคราะห์และออกแบบระบบ', description: 'ออกแบบขั้นตอนทำงาน โครงสร้างข้อมูล และสถาปัตยกรรม', effort: design, priority: 'must' },
+    ...modules,
+    Object.keys(test).length && { title: 'ทดสอบระบบและ UAT', description: 'ทดสอบรวม Regression และช่วยผู้ใช้ตรวจรับ', effort: test, priority: 'must' },
+    Object.keys(ship).length && { title: 'นำขึ้นใช้งานและส่งมอบ', description: 'นำขึ้นระบบจริง ส่งมอบ และสอนการใช้งาน', effort: ship, priority: 'must' },
+  ].filter(Boolean);
+  return { items, reasons };
+}
+
+// สรุปตำแหน่งที่ใช้ในรายการงาน (คำนวณจากรายการจริงเสมอ) พร้อมเหตุผล
+export function summarizeRoles(items, reasons = {}, settings = getSettings()) {
+  const hours = Number(settings.capacity.hours_per_day) > 0 ? Number(settings.capacity.hours_per_day) : 8;
+  const by = {};
+  for (const it of items) {
+    const effort = typeof it.effort === 'string' ? JSON.parse(it.effort) : it.effort || {};
+    for (const [code, d] of Object.entries(effort)) {
+      by[code] ??= { code, days: 0, items: [] };
+      by[code].days += d;
+      by[code].items.push(it.title);
+    }
+  }
+  return POSITION_CODES.filter((c) => by[c]).map((c) => {
+    const p = positionByCode[c];
+    const r = by[c];
+    return {
+      code: c, name: p.name, th: p.th, days: r.days, cost: r.days * hours * (settings.rates[c] ?? 0),
+      reason: reasons?.[c] || `ใช้ใน ${[...new Set(r.items)].join(', ')}`,
+    };
+  });
+}
+
 const RISK_WORDS = [
   [/ai|machine learning|ปัญญาประดิษฐ์|blockchain|เรียลไทม์|real-?time/i, 'มีส่วนที่ใช้เทคโนโลยีเฉพาะทาง ควรทำ Proof of Concept ก่อนยืนยันราคา'],
   [/ด่วน|เร่ง|ภายในสัปดาห์|asap/i, 'ลูกค้าต้องการงานเร่งด่วน ควรตกลงขอบเขตงานงวดแรกให้ชัด'],
@@ -153,12 +224,12 @@ export function fallbackAnalyze(deal) {
   const checks = parseChecks(deal);
   // ลูกค้าติ๊กเอง = should, จับได้จากคำสำคัญอย่างเดียว/บริการเสริม = could (เลื่อนไปเฟส 2 ได้ก่อนเมื่อเกินงบ)
   let modules = CATALOG.filter((m) => checks.includes(m.id) || m.k.test(text)).map(({ id, title, desc, effort }) => ({
-    title, description: desc, effort: { ...effort },
+    id, title, description: desc, effort: { ...effort },
     priority: checks.includes(id) && !OPTIONAL_MODULES.includes(id) ? 'should' : 'could',
   }));
   // รายการที่ admin เพิ่มเอง: ใช้เมื่อถูกติ๊กเท่านั้น (ไม่มีการจับคำสำคัญ)
   for (const m of getSettings().requirement_items) {
-    if (checks.includes(m.id)) modules.push({ title: m.title, description: m.desc, effort: { ...m.effort }, priority: 'should' });
+    if (checks.includes(m.id)) modules.push({ id: m.id, title: m.title, description: m.desc, effort: { ...m.effort }, priority: 'should' });
   }
 
   if (modules.length === 0) {
@@ -171,21 +242,15 @@ export function fallbackAnalyze(deal) {
     modules = [{ title: deal.title, description: 'ขอบเขตงานตามที่ตกลงกับลูกค้า', effort: { FE: 3, BE: 4, QA: 1 }, priority: 'must' }];
   }
 
-  const dev = modules.reduce((s, m) => s + Object.values(m.effort).reduce((a, b) => a + b, 0), 0);
-  const scale = (ratio, min) => Math.max(min, Math.round(dev * ratio * 2) / 2);
-  const items = [
-    { title: 'เก็บ Requirement และวางแผนโครงการ', description: 'สัมภาษณ์ผู้ใช้ สรุปขอบเขต แผนงาน และเกณฑ์ตรวจรับ', effort: { PM: scale(0.06, 1), BA: scale(0.08, 1) }, priority: 'must' },
-    { title: 'วิเคราะห์และออกแบบระบบ', description: 'ออกแบบขั้นตอนทำงาน โครงสร้างข้อมูล และสถาปัตยกรรม', effort: { SA: scale(0.08, 1), ARCH: scale(0.03, 0.5) }, priority: 'must' },
-    ...modules,
-    { title: 'ทดสอบระบบและ UAT', description: 'ทดสอบรวม Regression และช่วยผู้ใช้ตรวจรับ', effort: { QA: scale(0.08, 1), PM: scale(0.02, 0.5) }, priority: 'must' },
-    { title: 'นำขึ้นใช้งานและส่งมอบ', description: 'เตรียม Environment นำขึ้นระบบจริง อบรมการใช้งาน และรับประกัน', effort: { DEVOPS: scale(0.04, 1), SUPPORT: scale(0.03, 1) }, priority: 'must' },
-  ];
+  const { items: planned, reasons } = planFoundation(modules.map((m) => ({ ...m, effort: cleanEffort(m.effort) })));
+  const items = planned.map(({ id, ...it }) => it);
 
   const risks = RISK_WORDS.filter(([re]) => re.test(text)).map(([, msg]) => msg);
   if (deal.requirement.trim().length < 120 && checks.length < 3) risks.push('Requirement ยังสั้นมาก ควรเก็บรายละเอียดเพิ่มก่อนยืนยันราคา');
 
   return {
     source: 'fallback',
+    role_reasons: reasons,
     summary: `ประเมินเบื้องต้นจากเช็คลิสต์และคำสำคัญใน Requirement พบ ${modules.length} ส่วนงานหลัก`,
     technical_score: Math.max(40, 80 - risks.length * 10),
     risks,

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, date, DEAL_STATUS, money, phoneDigits, SELL } from '../lib.js';
+import { RolePreview } from '../components/RolePlan.jsx';
 import { Badge, Field, Icon, Modal, RequirementChecklist, useApp, useData } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 
@@ -162,6 +163,7 @@ export default function Deals() {
             <Field label="ข้อมูลเพิ่มเติม">
               <textarea value={form.requirement} onChange={set('requirement')} style={{ minHeight: 110 }} placeholder="รายละเอียดนอกเหนือจากเช็คลิสต์ เช่น ผู้ใช้งาน ขั้นตอนเฉพาะของธุรกิจ ระบบที่ต้องเชื่อมต่อ" />
             </Field>
+            <RolePreview title={form.title} checks={form.requirement_checks} requirement={form.requirement} />
           </div>
         </Modal>
       )}

@@ -8,6 +8,7 @@ const NAV = [
   { to: '/deals', label: 'งานขาย', icon: 'deal', roles: ALL_ROLES },
   { to: '/projects', label: 'โครงการ', icon: 'layers', roles: PROJECTS },
   { to: '/sharing', label: 'แบ่งผลประโยชน์', icon: 'pie', roles: WIDE },
+  { to: '/accounting', label: 'การเงิน', icon: 'book', roles: WIDE },
   { to: '/finance', label: 'รายรับรายจ่าย', icon: 'wallet', roles: WIDE },
   { to: '/demos', label: 'งาน dev', icon: 'spark', roles: ALL_ROLES, when: canEditDemo },
   { to: '/members', label: 'สมาชิก', icon: 'users', roles: ['admin'] },

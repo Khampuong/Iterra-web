@@ -5,6 +5,7 @@ import { Avatar, Badge, Bar, Field, Icon, Modal, RequirementChecklist, Tabs, use
 import { PageHead } from '../components/Layout.jsx';
 import DealChat from '../components/DealChat.jsx';
 import DealExtras from '../components/DealExtras.jsx';
+import { RolePreview, RoleTable } from '../components/RolePlan.jsx';
 
 const FEAS_COLOR = { go: 'var(--ok)', conditional: '#d39a1c', 'no-go': 'var(--danger)' };
 const tone = (score) => (score >= 75 ? 'ok' : score >= 50 ? 'warn' : 'danger');
@@ -160,6 +161,7 @@ function RequirementTab({ deal, canEdit, canAnalyze, busy, onSave, onAnalyze, on
           <textarea style={{ minHeight: 160 }} value={v('requirement')} onChange={set('requirement')} disabled={!canEdit}
             placeholder="อธิบายสิ่งที่ลูกค้าต้องการ: ใครใช้งาน ทำอะไรได้บ้าง ต้องเชื่อมกับระบบใด มีข้อจำกัดอะไร" />
         </Field>
+        {canEdit && <RolePreview title={f.title} checks={f.requirement_checks ?? []} requirement={f.requirement ?? ''} />}
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <span className="small muted">ยิ่งรายละเอียดชัด ราคาและระยะเวลาที่ประเมินยิ่งแม่น</span>
           <div className="row">
@@ -350,6 +352,8 @@ function EstimateTab({ deal, canPrice, limited, canSell, canAnalyze, busy, onSav
           </div>
         </div>
       )}
+
+      {!edit && <RoleTable roles={deal.roles} showCost={!['sales', 'staff'].includes(user.role)} />}
 
       {!edit && analysis && (
         <div className="card">
@@ -595,7 +599,7 @@ function DocsTab({ deal, isAdmin, canSell, busy, act, reload, close, setClose })
     }
   };
   const submitPay = async () => {
-    if (await run(() => api.post(`/documents/${pay.doc.id}/pay`, { date: pay.date, method: pay.method }), 'รับชำระและออกใบเสร็จแล้ว')) {
+    if (await run(() => api.post(`/documents/${pay.doc.id}/pay`, { date: pay.date, method: pay.method, wht_percent: pay.wht_percent }), 'รับชำระแล้ว — ออกใบเสร็จรับเงิน/ใบกำกับภาษีและบันทึกบัญชีเรียบร้อย')) {
       setPay(null);
       reload();
     }
@@ -625,7 +629,7 @@ function DocsTab({ deal, isAdmin, canSell, busy, act, reload, close, setClose })
                       <td className="right num">{money2(d.amount)}</td>
                       <td><Badge tone={t}>{label}</Badge></td>
                       <td className="right nowrap">
-                        {isAdmin && d.type === 'invoice' && d.status === 'issued' && <button className="btn sm" onClick={() => setPay({ doc: d, date: todayStr(), method: 'โอนเงิน' })}>รับชำระ</button>}{' '}
+                        {isAdmin && d.type === 'invoice' && d.status === 'issued' && <button className="btn sm" onClick={() => setPay({ doc: d, date: todayStr(), method: 'โอนเงิน', wht_percent: 3 })}>รับชำระ</button>}{' '}
                         <a className="btn sm ghost" href={`/print/${d.id}`} target="_blank" rel="noreferrer" aria-label={`พิมพ์ ${d.number}`} title="เปิดเอกสารเพื่อพิมพ์"><Icon name="print" /></a>
                       </td>
                     </tr>
@@ -686,10 +690,11 @@ function DocsTab({ deal, isAdmin, canSell, busy, act, reload, close, setClose })
         <Modal title={`รับชำระ ${pay.doc.number}`} onClose={() => setPay(null)}
           footer={<><button className="btn" onClick={() => setPay(null)}>ยกเลิก</button><button className="btn primary" onClick={submitPay}>ยืนยันรับชำระ</button></>}>
           <div className="stack">
-            <p>จำนวนเงิน <b className="num">฿{money2(pay.doc.amount)}</b> — ระบบจะออกใบเสร็จรับเงินและบันทึกรายรับ (ยอดก่อน VAT) ให้อัตโนมัติ</p>
+            <p>จำนวนเงิน <b className="num">฿{money2(pay.doc.amount)}</b> — ระบบจะออกใบเสร็จรับเงิน/ใบกำกับภาษี บันทึกรายรับ และบันทึกบัญชี (ย้าย VAT 21310 → 21300) ให้อัตโนมัติ</p>
             <div className="grid g2">
               <Field label="วันที่รับชำระ"><input type="date" value={pay.date} onChange={(e) => setPay({ ...pay, date: e.target.value })} /></Field>
               <Field label="ช่องทาง"><select value={pay.method} onChange={(e) => setPay({ ...pay, method: e.target.value })}><option>โอนเงิน</option><option>เช็ค</option><option>เงินสด</option><option>บัตรเครดิต</option></select></Field>
+              <Field label="ลูกค้าหักภาษี ณ ที่จ่าย"><select value={pay.wht_percent} onChange={(e) => setPay({ ...pay, wht_percent: Number(e.target.value) })}>{[0, 1, 2, 3, 5].map((r) => <option key={r} value={r}>{r ? `${r}% (ต้องได้ 50 ทวิ)` : 'ไม่หัก'}</option>)}</select></Field>
             </div>
           </div>
         </Modal>
