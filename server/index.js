@@ -8,6 +8,7 @@ import adminRoutes from './routes/admin.js';
 import dealRoutes, { documents } from './routes/deals.js';
 import projectRoutes from './routes/projects.js';
 import financeRoutes from './routes/finance.js';
+import accountingRoutes from './routes/accounting.js';
 import demoRoutes from './routes/demos.js';
 import teamRoutes from './routes/teamwork.js';
 import extraRoutes from './routes/extras.js';
@@ -46,6 +47,7 @@ app.use('/api/deals', dealRoutes);
 app.use('/api/documents', documents);
 app.use('/api/projects', projectRoutes);
 app.use('/api/demos', demoRoutes);
+app.use('/api', accountingRoutes); // เมนูการเงิน (บัญชี)
 app.use('/api', financeRoutes);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'ไม่พบ API นี้' }));
 

@@ -231,14 +231,20 @@ export const q = {
   run: (sql, ...p) => db.prepare(sql).run(...p),
 };
 
+// เรียกซ้อนกันได้: ชั้นในใช้ SAVEPOINT (เช่น บันทึกบัญชีภายในการรับชำระ)
+let txDepth = 0;
 export function tx(fn) {
-  db.exec('BEGIN');
+  const sp = txDepth ? `sp${txDepth}` : null;
+  db.exec(sp ? `SAVEPOINT ${sp}` : 'BEGIN');
+  txDepth += 1;
   try {
     const out = fn();
-    db.exec('COMMIT');
+    txDepth -= 1;
+    db.exec(sp ? `RELEASE ${sp}` : 'COMMIT');
     return out;
   } catch (e) {
-    db.exec('ROLLBACK');
+    txDepth -= 1;
+    db.exec(sp ? `ROLLBACK TO ${sp}; RELEASE ${sp}` : 'ROLLBACK');
     throw e;
   }
 }

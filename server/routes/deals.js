@@ -7,6 +7,7 @@ import { fallbackDemo } from '../demo-template.js';
 import { cleanHttpUrl } from '../url.js';
 import { analyzeRequirement, generateDemo, AiUnavailable } from '../ai.js';
 import { createProjectFromDeal } from './projects.js';
+import { LedgerError, receivePayment } from '../ledger.js';
 
 const router = Router();
 const sales = requireRole(...SELL_ROLES); // ขายงานได้
@@ -514,21 +515,30 @@ documents.post('/:id/pay', admin, (req, res) => {
   const data = JSON.parse(inv.data);
   const paidAt = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.date || '') ? req.body.date : today();
   const project = q.get('SELECT id FROM projects WHERE deal_id = ?', deal.id);
+  const whtPercent = Number(req.body?.wht_percent) || 0; // ลูกค้าหักภาษี ณ ที่จ่าย (เช่น 3%)
 
-  const receipt = tx(() => {
-    q.run("UPDATE documents SET status = 'paid' WHERE id = ?", inv.id);
-    const r = createDocument(deal, 'receipt', 'RC', {
-      amount: inv.amount, ref_id: inv.id, status: 'paid', issued_at: paidAt,
-      data: { ...data, paid_at: paidAt, method: req.body?.method || 'โอนเงิน' },
+  let receipt;
+  try {
+    receipt = tx(() => {
+      q.run("UPDATE documents SET status = 'paid' WHERE id = ?", inv.id);
+      const r = createDocument(deal, 'receipt', 'RC', {
+        amount: inv.amount, ref_id: inv.id, status: 'paid', issued_at: paidAt,
+        data: { ...data, paid_at: paidAt, method: req.body?.method || 'โอนเงิน' },
+      });
+      q.run(
+        "INSERT INTO transactions (project_id, type, category, amount, date, note, document_id) VALUES (?, 'income', 'รับชำระค่างาน', ?, ?, ?, ?)",
+        project?.id ?? null, data.installment.net, paidAt,
+        `${inv.number} ${data.installment.label} (VAT ${data.installment.vat.toLocaleString('th-TH')} บาท แยกต่างหาก)`, r.id,
+      );
+      // บันทึกบัญชี: วางบิล (ถ้ายังไม่ได้วาง) + รับชำระ ย้ายภาษีขายรอเรียกเก็บ 21310 -> ภาษีขาย 21300 (tax point งานบริการ)
+      receivePayment(inv, { date: paidAt, wht_percent: whtPercent, method: req.body?.method || 'โอนเงิน', receipt_id: r.id, user_id: req.user.id, revenue_account: req.body?.revenue_account || '41100' });
+      if (deal.sales_id) notify({ user_id: deal.sales_id, title: `รับชำระ ${inv.number}`, body: deal.title, link: `/deals/${deal.id}` });
+      return r;
     });
-    q.run(
-      "INSERT INTO transactions (project_id, type, category, amount, date, note, document_id) VALUES (?, 'income', 'รับชำระค่างาน', ?, ?, ?, ?)",
-      project?.id ?? null, data.installment.net, paidAt,
-      `${inv.number} ${data.installment.label} (VAT ${data.installment.vat.toLocaleString('th-TH')} บาท แยกต่างหาก)`, r.id,
-    );
-    if (deal.sales_id) notify({ user_id: deal.sales_id, title: `รับชำระ ${inv.number}`, body: deal.title, link: `/deals/${deal.id}` });
-    return r;
-  });
+  } catch (e) {
+    if (e instanceof LedgerError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
   res.json(receipt);
 });
 

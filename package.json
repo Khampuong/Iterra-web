@@ -8,7 +8,8 @@
     "dev": "concurrently -n api,web -c blue,gray \"node --env-file-if-exists=.env --watch server/index.js\" \"vite\"",
     "build": "vite build",
     "start": "node --env-file-if-exists=.env server/index.js",
-    "seed:team": "node --env-file-if-exists=.env server/seed-team.js"
+    "seed:team": "node --env-file-if-exists=.env server/seed-team.js",
+    "test": "node --test \"server/**/*.test.js\""
   },
   "engines": {
     "node": ">=22.13"
